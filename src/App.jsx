@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import Plotly from 'plotly.js-dist-min';
 import createPlotlyComponent from 'react-plotly.js/factory';
 import { Play, Pause, FastForward, RotateCcw, BrainCircuit, Sun, Moon } from 'lucide-react';
+import { MLP, generateClassificationData } from './MLP';
 
 // Plotly.js 3+ often crashes in React 19 during unmount due to strict DOM detachments.
 // Wrapping its purge method protects the app from unmount crashes.
@@ -59,6 +60,17 @@ export default function App() {
     // Track the viewport of the 1D plot to keep curve "infinite"
     const [mView, setMView] = useState({ min: -2, max: 6 });
 
+    // Step 3 (Neural Network) State
+    const [hiddenNeurons, setHiddenNeurons] = useState(4);
+    const mlpRef = useRef(new MLP(4));
+    const [datasetType, setDatasetType] = useState('circles');
+    const [classData, setClassData] = useState(() => generateClassificationData('circles'));
+    const [nnEpochs, setNnEpochs] = useState(0);
+    const [nnLoss, setNnLoss] = useState(1);
+    const [nnLossHistory, setNnLossHistory] = useState([]);
+
+    const [showProbSurface, setShowProbSurface] = useState(false);
+
     const [theme, setTheme] = useState('dark');
 
     useEffect(() => {
@@ -75,8 +87,22 @@ export default function App() {
     // Preserve 3D camera angle across data updates
     const cameraRef = useRef(null);
 
+    const resetMLP = (neurons) => {
+        mlpRef.current = new MLP(neurons);
+        setNnEpochs(0);
+        setNnLossHistory([]);
+        setPendingGradient(null);
+    };
+
+    useEffect(() => { resetMLP(hiddenNeurons); }, [hiddenNeurons]);
+
     // Reset model
     const resetModel = () => {
+        if (step === 3) {
+            resetMLP(hiddenNeurons);
+            setIsPlaying(false);
+            return;
+        }
         setM(0);
         setB(0);
         setHistory([{ m: 0, b: 0, cost: calcCost(data, 0, 0) }]);
@@ -84,8 +110,13 @@ export default function App() {
         setPendingGradient(null);
     };
 
-    const regenerateData = () => {
-        setData(generateData(parseFloat(trueM) || 0, parseFloat(trueB) || 0));
+    const regenerateData = (type) => {
+        const t = type ?? datasetType;
+        if (step === 3) {
+            setClassData(generateClassificationData(t));
+        } else {
+            setData(generateData(parseFloat(trueM) || 0, parseFloat(trueB) || 0));
+        }
         resetModel();
     };
 
@@ -95,11 +126,13 @@ export default function App() {
     const lrRef = useRef(lr);
     const stepRef = useRef(step);
     const dataRef = useRef(data);
+    const classDataRef = useRef(classData);
     useEffect(() => { mRef.current = m; }, [m]);
     useEffect(() => { bRef.current = b; }, [b]);
     useEffect(() => { lrRef.current = lr; }, [lr]);
     useEffect(() => { stepRef.current = step; }, [step]);
     useEffect(() => { dataRef.current = data; }, [data]);
+    useEffect(() => { classDataRef.current = classData; }, [classData]);
 
     // Calculate Gradient using explicit m,b values (no stale closures)
     const calculateGradientAt = (curM, curB, curStep, curData) => {
@@ -187,7 +220,24 @@ export default function App() {
         let intervalId;
         if (isPlaying) {
             intervalId = setInterval(() => {
-                takeStepFromRefs();
+                if (stepRef.current === 3) {
+                    const lrVal = lrRef.current;
+                    let lastLoss = 0;
+                    for (let i = 0; i < 5; i++) {
+                        mlpRef.current.forward(classDataRef.current);
+                        lastLoss = mlpRef.current.backward(classDataRef.current, lrVal);
+                    }
+                    setNnEpochs(e => {
+                        const next = e + 5;
+                        setNnLoss(lastLoss);
+                        if (next % 10 === 0) {
+                            setNnLossHistory(prev => [...prev, { epoch: next, loss: lastLoss }]);
+                        }
+                        return next;
+                    });
+                } else {
+                    takeStepFromRefs();
+                }
             }, 100);
         }
         return () => { if (intervalId) clearInterval(intervalId); };
@@ -261,6 +311,23 @@ export default function App() {
         return { m_vals, b_vals, cost_grid };
     };
 
+    // Generate Neural Net Contour Grid on the fly if Step 3
+    let contourZ = [];
+    let contourX = [];
+    let contourY = [];
+    if (step === 3) {
+        for (let i = -6; i <= 6; i += 0.4) contourX.push(i);
+        for (let j = -6; j <= 6; j += 0.4) contourY.push(j);
+        for (let y of contourY) {
+            let row = [];
+            for (let x of contourX) {
+                const prob = mlpRef.current.predict(x, y);
+                row.push(showProbSurface ? prob : (prob >= 0.5 ? 1 : 0));
+            }
+            contourZ.push(row);
+        }
+    }
+
     return (
         <div className="app-container">
             <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
@@ -289,67 +356,126 @@ export default function App() {
                 }}>
                     Step 2: 2D Search (Slope & Intercept)
                 </div>
+                <div className={`nav-tab ${step === 3 ? 'active' : ''}`} onClick={() => {
+                    setStep(3); resetMLP(hiddenNeurons); setClassData(generateClassificationData()); setIsPlaying(false);
+                }}>
+                    Step 3: Neural Network (Classification)
+                </div>
             </div>
 
             <div className="layout-grid glass-panel">
                 {/* LEFT PANEL: Data & Fit */}
                 <div className="control-panel" style={{ borderRight: '1px solid var(--border-color)' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                        <h3 style={{ margin: 0, color: 'var(--accent)' }}>Data & Regression Fit</h3>
-                        <label style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.85rem', color: '#94a3b8', cursor: 'pointer' }}>
-                            <input type="checkbox" checked={showErrors} onChange={e => setShowErrors(e.target.checked)} style={{ accentColor: '#ef4444' }} />
-                            Show Errors
-                        </label>
+                        <h3 style={{ margin: 0, color: 'var(--accent)' }}>{step === 3 ? "Decision Boundary" : "Data & Regression Fit"}</h3>
+                        {step !== 3 ? (
+                            <label style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.85rem', color: '#94a3b8', cursor: 'pointer' }}>
+                                <input type="checkbox" checked={showErrors} onChange={e => setShowErrors(e.target.checked)} style={{ accentColor: '#ef4444' }} />
+                                Show Errors
+                            </label>
+                        ) : (
+                            <label style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.85rem', color: '#94a3b8', cursor: 'pointer', userSelect: 'none' }}>
+                                <input type="checkbox" checked={showProbSurface} onChange={e => setShowProbSurface(e.target.checked)} style={{ accentColor: '#3b82f6' }} />
+                                Prob. Surface
+                            </label>
+                        )}
                     </div>
-                    <Plot
-                        data={[
-                            {
-                                x: xVals,
-                                y: yVals,
-                                mode: 'markers',
-                                type: 'scatter',
-                                marker: { color: '#3b82f6', size: 8 },
-                                name: 'Data Points'
-                            },
-                            {
-                                x: line_X,
-                                y: line_Y,
-                                mode: 'lines',
-                                type: 'scatter',
-                                line: { color: '#ef4444', width: 3 },
-                                name: 'Prediction'
-                            },
-                            ...(showErrors ? data.map((pt, i) => {
-                                const pred = m * pt.x + currentB;
-                                return {
-                                    x: [pt.x, pt.x],
-                                    y: [pt.y, pred],
+                    {step === 3 ? (
+                        <Plot
+                            data={[
+                                {
+                                    z: contourZ,
+                                    x: contourX,
+                                    y: contourY,
+                                    type: 'contour',
+                                    colorscale: [
+                                        [0, 'rgba(59, 130, 246, 0.5)'],
+                                        [0.5, 'transparent'],
+                                        [1, 'rgba(239, 68, 68, 0.5)']
+                                    ],
+                                    showscale: false,
+                                    hoverinfo: 'skip'
+                                },
+                                {
+                                    x: classData.filter(d => d.label === 0).map(d => d.x),
+                                    y: classData.filter(d => d.label === 0).map(d => d.y),
+                                    mode: 'markers',
+                                    type: 'scatter',
+                                    marker: { color: '#3b82f6', size: 10, line: { color: 'white', width: 1 } },
+                                    name: 'Class 0'
+                                },
+                                {
+                                    x: classData.filter(d => d.label === 1).map(d => d.x),
+                                    y: classData.filter(d => d.label === 1).map(d => d.y),
+                                    mode: 'markers',
+                                    type: 'scatter',
+                                    marker: { color: '#ef4444', size: 10, line: { color: 'white', width: 1 } },
+                                    name: 'Class 1'
+                                }
+                            ]}
+                            layout={{
+                                autosize: true,
+                                paper_bgcolor: 'transparent',
+                                plot_bgcolor: 'transparent',
+                                font: { color: pTheme.fontColor },
+                                margin: { t: 30, r: 20, l: 60, b: 60 },
+                                xaxis: { title: { text: 'x1' }, gridcolor: pTheme.gridColor, automargin: true, range: [-6, 6] },
+                                yaxis: { title: { text: 'x2' }, gridcolor: pTheme.gridColor, automargin: true, range: [-6, 6] }
+                            }}
+                            useResizeHandler={true}
+                            style={{ width: "100%", height: "350px" }}
+                        />
+                    ) : (
+                        <Plot
+                            data={[
+                                {
+                                    x: xVals,
+                                    y: yVals,
+                                    mode: 'markers',
+                                    type: 'scatter',
+                                    marker: { color: '#3b82f6', size: 8 },
+                                    name: 'Data Points'
+                                },
+                                {
+                                    x: line_X,
+                                    y: line_Y,
                                     mode: 'lines',
                                     type: 'scatter',
-                                    line: { color: 'rgba(239, 68, 68, 0.5)', width: 1.5, dash: 'dash' },
-                                    showlegend: i === 0,
-                                    name: i === 0 ? 'Residual' : undefined,
-                                    hoverinfo: 'skip'
-                                };
-                            }) : [])
-                        ]}
-                        layout={{
-                            autosize: true,
-                            paper_bgcolor: 'transparent',
-                            plot_bgcolor: 'transparent',
-                            font: { color: pTheme.fontColor },
-                            margin: { t: 30, r: 20, l: 80, b: 80 },
-                            xaxis: { title: { text: 'x', standoff: 15 }, gridcolor: pTheme.gridColor, automargin: true },
-                            yaxis: { title: { text: 'y', standoff: 15 }, gridcolor: pTheme.gridColor, automargin: true }
-                        }}
-                        useResizeHandler={true}
-                        style={{ width: "100%", height: "350px" }}
-                    />
+                                    line: { color: '#ef4444', width: 3 },
+                                    name: 'Prediction'
+                                },
+                                ...(showErrors ? data.map((pt, i) => {
+                                    const pred = m * pt.x + currentB;
+                                    return {
+                                        x: [pt.x, pt.x],
+                                        y: [pt.y, pred],
+                                        mode: 'lines',
+                                        type: 'scatter',
+                                        line: { color: 'rgba(239, 68, 68, 0.5)', width: 1.5, dash: 'dash' },
+                                        showlegend: i === 0,
+                                        name: i === 0 ? 'Residual' : undefined,
+                                        hoverinfo: 'skip'
+                                    };
+                                }) : [])
+                            ]}
+                            layout={{
+                                autosize: true,
+                                paper_bgcolor: 'transparent',
+                                plot_bgcolor: 'transparent',
+                                font: { color: pTheme.fontColor },
+                                margin: { t: 30, r: 20, l: 80, b: 80 },
+                                xaxis: { title: { text: 'x', standoff: 15 }, gridcolor: pTheme.gridColor, automargin: true },
+                                yaxis: { title: { text: 'y', standoff: 15 }, gridcolor: pTheme.gridColor, automargin: true }
+                            }}
+                            useResizeHandler={true}
+                            style={{ width: "100%", height: "350px" }}
+                        />
+                    )}
 
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
                         <div className="metric-card">
-                            <div className="metric-value">{m.toFixed(3)}</div>
-                            <div className="metric-label">Slope (m)</div>
+                            <div className="metric-value">{step === 3 ? nnLoss.toFixed(4) : m.toFixed(3)}</div>
+                            <div className="metric-label">{step === 3 ? 'Cross Entropy Loss' : 'Slope (m)'}</div>
                         </div>
                         {step === 2 && (
                             <div className="metric-card">
@@ -357,46 +483,101 @@ export default function App() {
                                 <div className="metric-label">Intercept (b)</div>
                             </div>
                         )}
-                        <div className="metric-card">
-                            <div className="metric-value">{calcCost(data, m, step === 1 ? 0 : b).toFixed(3)}</div>
-                            <div className="metric-label">MSE (Cost)</div>
-                        </div>
+                        {step !== 3 && (
+                            <div className="metric-card">
+                                <div className="metric-value">{calcCost(data, m, step === 1 ? 0 : b).toFixed(3)}</div>
+                                <div className="metric-label">MSE (Cost)</div>
+                            </div>
+                        )}
                     </div>
 
-                    <div style={{ marginTop: '1.5rem', padding: '1rem', background: 'var(--card-bg)', borderRadius: '12px', border: '1px solid var(--border-color)', boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)' }}>
-                        <h4 style={{ margin: '0 0 0.5rem 0', color: '#94a3b8' }}>Teacher Controls (Secret Truth)</h4>
-                        <div style={{ display: 'flex', gap: '1rem', alignItems: 'flex-end', flexWrap: 'wrap' }}>
-                            <div>
-                                <label style={{ display: 'block', fontSize: '0.8rem', color: '#94a3b8', marginBottom: '0.25rem' }}>True Slope</label>
-                                <input
-                                    type="password"
-                                    value={trueM}
-                                    onChange={e => setTrueM(e.target.value)}
-                                    style={{ width: '80px', background: 'var(--bg-color)', border: '1px solid var(--input-border)', color: 'var(--text-color)', padding: '0.5rem', borderRadius: '4px' }}
-                                />
+                    {step === 3 ? (
+                        <div style={{ marginTop: '1.5rem', padding: '1rem', background: 'var(--card-bg)', borderRadius: '12px', border: '1px solid var(--border-color)', boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)' }}>
+                            <h4 style={{ margin: '0 0 0.75rem 0', color: '#94a3b8' }}>Network Architecture (Complexity)</h4>
+                            <div style={{ marginBottom: '1rem' }}>
+                                <div style={{ fontSize: '0.8rem', color: '#94a3b8', marginBottom: '0.5rem' }}>Dataset Pattern</div>
+                                <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
+                                    {['circles', 'moons', 'spirals'].map(t => (
+                                        <button
+                                            key={t}
+                                            onClick={() => {
+                                                setDatasetType(t);
+                                                setClassData(generateClassificationData(t));
+                                                resetMLP(hiddenNeurons);
+                                                setIsPlaying(false);
+                                            }}
+                                            style={{
+                                                padding: '0.3rem 0.75rem',
+                                                borderRadius: '999px',
+                                                border: `1px solid ${datasetType === t ? 'var(--primary)' : 'var(--border-color)'}`,
+                                                background: datasetType === t ? 'var(--primary)' : 'transparent',
+                                                color: datasetType === t ? 'white' : 'var(--text-color)',
+                                                fontSize: '0.8rem',
+                                                cursor: 'pointer',
+                                                textTransform: 'capitalize',
+                                                transition: 'all 0.2s'
+                                            }}
+                                        >
+                                            {t}
+                                        </button>
+                                    ))}
+                                </div>
                             </div>
-                            {step === 2 && (
+                            <div className="slider-container">
+                                <div className="slider-header">
+                                    <span>Hidden Neurons</span>
+                                    <span style={{ color: 'var(--primary)' }}>{hiddenNeurons} Neurons</span>
+                                </div>
+                                <input
+                                    type="range"
+                                    min="2" max="25" step="1"
+                                    value={hiddenNeurons}
+                                    onChange={e => setHiddenNeurons(Number(e.target.value))}
+                                />
+                                <small style={{ color: '#94a3b8', fontSize: '0.75rem', marginTop: '0.25rem', display: 'block' }}>
+                                    More neurons = more complex boundaries. Try switching dataset patterns to see how even 2 neurons can fail on spirals!
+                                </small>
+                            </div>
+                            <button className="btn btn-secondary" onClick={() => regenerateData()} style={{ padding: '0.5rem 1rem', marginTop: '1rem' }}>
+                                <RotateCcw size={16} /> Rescatter Dataset
+                            </button>
+                        </div>
+                    ) : (
+                        <div style={{ marginTop: '1.5rem', padding: '1rem', background: 'var(--card-bg)', borderRadius: '12px', border: '1px solid var(--border-color)', boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)' }}>
+                            <h4 style={{ margin: '0 0 0.5rem 0', color: '#94a3b8' }}>Teacher Controls (Secret Truth)</h4>
+                            <div style={{ display: 'flex', gap: '1rem', alignItems: 'flex-end', flexWrap: 'wrap' }}>
                                 <div>
-                                    <label style={{ display: 'block', fontSize: '0.8rem', color: '#94a3b8', marginBottom: '0.25rem' }}>True Intercept</label>
+                                    <label style={{ display: 'block', fontSize: '0.8rem', color: '#94a3b8', marginBottom: '0.25rem' }}>True Slope</label>
                                     <input
                                         type="password"
-                                        value={trueB}
-                                        onChange={e => setTrueB(e.target.value)}
+                                        value={trueM}
+                                        onChange={e => setTrueM(e.target.value)}
                                         style={{ width: '80px', background: 'var(--bg-color)', border: '1px solid var(--input-border)', color: 'var(--text-color)', padding: '0.5rem', borderRadius: '4px' }}
                                     />
                                 </div>
-                            )}
-                            <button className="btn btn-secondary" onClick={regenerateData} style={{ padding: '0.5rem 1rem' }}>
-                                <RotateCcw size={16} /> Data
-                            </button>
+                                {step === 2 && (
+                                    <div>
+                                        <label style={{ display: 'block', fontSize: '0.8rem', color: '#94a3b8', marginBottom: '0.25rem' }}>True Intercept</label>
+                                        <input
+                                            type="password"
+                                            value={trueB}
+                                            onChange={e => setTrueB(e.target.value)}
+                                            style={{ width: '80px', background: 'var(--bg-color)', border: '1px solid var(--input-border)', color: 'var(--text-color)', padding: '0.5rem', borderRadius: '4px' }}
+                                        />
+                                    </div>
+                                )}
+                                <button className="btn btn-secondary" onClick={regenerateData} style={{ padding: '0.5rem 1rem' }}>
+                                    <RotateCcw size={16} /> Data
+                                </button>
+                            </div>
                         </div>
-                    </div>
+                    )}
                 </div>
 
                 {/* RIGHT PANEL: Optimization Surface / Curve */}
                 <div className="control-panel">
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                        <h3 style={{ margin: 0, color: 'var(--accent)' }}>Cost Landscape</h3>
+                        <h3 style={{ margin: 0, color: 'var(--accent)' }}>{step === 3 ? "Learning Curve" : "Cost Landscape"}</h3>
                         <div style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
                             {step === 2 && (
                                 <button className="btn btn-secondary" onClick={() => setShow3D(!show3D)} style={{ padding: '0.25rem 0.5rem', fontSize: '0.8rem' }}>
@@ -606,14 +787,44 @@ export default function App() {
                         })()}
                     </div>
 
+                    {/* STEP 3 PLOT - Learning Curve */}
+                    <div style={{ display: step === 3 ? 'block' : 'none', flex: 1 }}>
+                        <Plot
+                            data={[
+                                {
+                                    x: nnLossHistory.map(h => h.epoch),
+                                    y: nnLossHistory.map(h => h.loss),
+                                    mode: 'lines',
+                                    type: 'scatter',
+                                    line: { color: '#10b981', width: 2 },
+                                    name: 'Cross Entropy'
+                                }
+                            ]}
+                            layout={{
+                                showlegend: false,
+                                autosize: true,
+                                paper_bgcolor: 'transparent',
+                                plot_bgcolor: 'transparent',
+                                font: { color: pTheme.fontColor },
+                                margin: { t: 30, r: 20, l: 80, b: 80 },
+                                xaxis: { title: { text: 'Epochs', standoff: 15 }, gridcolor: pTheme.gridColor, automargin: true },
+                                yaxis: { title: { text: 'Log Loss', standoff: 15 }, gridcolor: pTheme.gridColor, automargin: true, rangemode: 'tozero' }
+                            }}
+                            useResizeHandler={true}
+                            style={{ width: "100%", height: "350px" }}
+                        />
+                    </div>
+
                     <div style={{ display: 'flex', gap: '1rem', marginTop: 'auto' }}>
                         <button className="btn" onClick={() => { setIsPlaying(!isPlaying); setPendingGradient(null); }}>
                             {isPlaying ? <Pause size={18} /> : <Play size={18} />}
                             {isPlaying ? "Pause" : "Play"}
                         </button>
-                        <button className="btn btn-secondary" onClick={handleManualStep} disabled={isPlaying}>
-                            <FastForward size={18} /> {pendingGradient ? "Apply Step" : "Show Slope"}
-                        </button>
+                        {step !== 3 && (
+                            <button className="btn btn-secondary" onClick={handleManualStep} disabled={isPlaying}>
+                                <FastForward size={18} /> {pendingGradient ? "Apply Step" : "Show Slope"}
+                            </button>
+                        )}
                         <button className="btn btn-secondary" onClick={resetModel}>
                             <RotateCcw size={18} /> Reset
                         </button>
