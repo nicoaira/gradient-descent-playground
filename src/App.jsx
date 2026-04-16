@@ -1,0 +1,601 @@
+import React, { useState, useEffect, useRef } from 'react';
+import Plotly from 'plotly.js-dist-min';
+import createPlotlyComponent from 'react-plotly.js/factory';
+import { Play, Pause, FastForward, RotateCcw, BrainCircuit } from 'lucide-react';
+
+// Plotly.js 3+ often crashes in React 19 during unmount due to strict DOM detachments.
+// Wrapping its purge method protects the app from unmount crashes.
+const originalPurge = Plotly.purge;
+Plotly.purge = (gd) => {
+    try {
+        if (originalPurge) originalPurge(gd);
+    } catch (e) {
+        console.warn("Caught Plotly purge error on unmount:", e);
+    }
+};
+
+const Plot = createPlotlyComponent(Plotly);
+
+const generateData = (trueM, trueB) => {
+    const pts = [];
+    for (let i = 0; i < 20; i++) {
+        const x = Math.random() * 10;
+        const y = trueM * x + trueB + (Math.random() - 0.5) * 4; // Add noise
+        pts.push({ x, y });
+    }
+    return pts.sort((a, b) => a.x - b.x);
+};
+
+// Calculate Cost (MSE)
+const calcCost = (data, m, b) => {
+    let error = 0;
+    for (let pt of data) {
+        const pred = m * pt.x + b;
+        error += Math.pow(pred - pt.y, 2);
+    }
+    return error / (2 * data.length);
+};
+
+export default function App() {
+    const [step, setStep] = useState(1);
+    const [trueM, setTrueM] = useState("2.8");
+    const [trueB, setTrueB] = useState("0");
+    const [data, setData] = useState(() => generateData(2.8, 0));
+
+    // Model parameters
+    const [m, setM] = useState(0);
+    const [b, setB] = useState(0);
+    const [lr, setLr] = useState(0.01);
+    const [isPlaying, setIsPlaying] = useState(false);
+    const [show3D, setShow3D] = useState(false);
+    const [showErrors, setShowErrors] = useState(true);
+
+    // New state for visualizing the slope/gradient before stepping
+    const [pendingGradient, setPendingGradient] = useState(null);
+
+    // Tracing the path of gradient descent
+    const [history, setHistory] = useState([{ m: 0, b: 0, cost: calcCost(data, 0, 0) }]);
+
+    // Reference for the animation loop
+    const requestRef = useRef();
+    // Preserve 3D camera angle across data updates
+    const cameraRef = useRef(null);
+
+    // Reset model
+    const resetModel = () => {
+        setM(0);
+        setB(0);
+        setHistory([{ m: 0, b: 0, cost: calcCost(data, 0, 0) }]);
+        setIsPlaying(false);
+        setPendingGradient(null);
+    };
+
+    const regenerateData = () => {
+        setData(generateData(parseFloat(trueM) || 0, parseFloat(trueB) || 0));
+        resetModel();
+    };
+
+    // Use refs so the animation loop always reads the latest values
+    const mRef = useRef(m);
+    const bRef = useRef(b);
+    const lrRef = useRef(lr);
+    const stepRef = useRef(step);
+    const dataRef = useRef(data);
+    useEffect(() => { mRef.current = m; }, [m]);
+    useEffect(() => { bRef.current = b; }, [b]);
+    useEffect(() => { lrRef.current = lr; }, [lr]);
+    useEffect(() => { stepRef.current = step; }, [step]);
+    useEffect(() => { dataRef.current = data; }, [data]);
+
+    // Calculate Gradient using explicit m,b values (no stale closures)
+    const calculateGradientAt = (curM, curB, curStep, curData) => {
+        const N = curData.length;
+        let dj_dm = 0;
+        let dj_db = 0;
+
+        for (let pt of curData) {
+            const usedB = curStep === 1 ? 0 : curB;
+            const pred = curM * pt.x + usedB;
+            const error = pred - pt.y;
+
+            dj_dm += error * pt.x;
+            if (curStep === 2) {
+                dj_db += error;
+            }
+        }
+        return { dj_dm: dj_dm / N, dj_db: dj_db / N };
+    };
+
+    // Convenience wrapper using current state (for manual steps)
+    const calculateGradient = () => calculateGradientAt(m, b, step, data);
+
+    const applyGradient = (dj_dm, dj_db) => {
+        setM((prevM) => {
+            const curLr = lrRef.current;
+            const curStep = stepRef.current;
+            const curData = dataRef.current;
+            const newM = prevM - curLr * dj_dm;
+            setB((prevB) => {
+                const newB = curStep === 1 ? 0 : prevB - curLr * dj_db;
+                const newCost = calcCost(curData, newM, newB);
+                setHistory(prev => [...prev, { m: newM, b: newB, cost: newCost }]);
+                return newB;
+            });
+            return newM;
+        });
+    };
+
+    // One full step: compute gradient from current refs, then apply
+    const takeStepFromRefs = () => {
+        setM((prevM) => {
+            const curB = bRef.current;
+            const curLr = lrRef.current;
+            const curStep = stepRef.current;
+            const curData = dataRef.current;
+            const grads = calculateGradientAt(prevM, curB, curStep, curData);
+            const newM = prevM - curLr * grads.dj_dm;
+            setB((prevB) => {
+                const newB = curStep === 1 ? 0 : prevB - curLr * grads.dj_db;
+                const newCost = calcCost(curData, newM, newB);
+                setHistory(prev => [...prev, { m: newM, b: newB, cost: newCost }]);
+                return newB;
+            });
+            return newM;
+        });
+    };
+
+    // Manual interaction step (uses current rendered state)
+    const handleManualStep = () => {
+        if (!pendingGradient) {
+            setPendingGradient(calculateGradient());
+        } else {
+            applyGradient(pendingGradient.dj_dm, pendingGradient.dj_db);
+            setPendingGradient(null);
+        }
+    };
+
+    // Handle clicking directly on the plot to set m/b
+    const handlePlotClick = (evt, isStep1) => {
+        if (!evt || !evt.points || evt.points.length === 0) return;
+        const pt = evt.points[0];
+        const newM = pt.x;
+        const newB = isStep1 ? 0 : pt.y;
+
+        setIsPlaying(false);
+        setM(newM);
+        setB(newB);
+        setPendingGradient(null);
+        setHistory([{ m: newM, b: newB, cost: calcCost(data, newM, newB) }]);
+    };
+
+    // Animation Loop – stable interval, no dependency on m/b
+    useEffect(() => {
+        let intervalId;
+        if (isPlaying) {
+            intervalId = setInterval(() => {
+                takeStepFromRefs();
+            }, 100);
+        }
+        return () => { if (intervalId) clearInterval(intervalId); };
+    }, [isPlaying]);
+
+
+    // Prepare Plot Data
+    const xVals = data.map(d => d.x);
+    const yVals = data.map(d => d.y);
+    const max_X = Math.max(...xVals, 10);
+    const line_X = [0, max_X];
+    const currentB = step === 1 ? 0 : b;
+    const line_Y = [currentB, m * max_X + currentB];
+
+    // 1D Cost Curve Setup (Cost vs m, assuming b=0)
+    const calc1DCurve = () => {
+        const m_vals = [];
+        const cost_vals = [];
+        for (let i = -2; i <= 6; i += 0.2) {
+            m_vals.push(i);
+            cost_vals.push(calcCost(data, i, 0));
+        }
+        return { m_vals, cost_vals };
+    };
+
+    // 3D Cost Surface Setup (Cost vs m vs b)
+    const calc2DSurface = () => {
+        const m_vals = [];
+        const b_vals = [];
+        const cost_grid = [];
+
+        // Dynamically size the grid to ensure it always encompasses the entire path
+        let min_m = -2;
+        let max_m = 6;
+        let min_b = -5;
+        let max_b = 15;
+
+        for (let h of history) {
+            if (h.m < min_m) min_m = h.m;
+            if (h.m > max_m) max_m = h.m;
+            if (h.b < min_b) min_b = h.b;
+            if (h.b > max_b) max_b = h.b;
+        }
+
+        // Add 10% padding so the red points never sit exactly on the edge
+        const m_pad = Math.max((max_m - min_m) * 0.1, 1);
+        const b_pad = Math.max((max_b - min_b) * 0.1, 1);
+        min_m -= m_pad;
+        max_m += m_pad;
+        min_b -= b_pad;
+        max_b += b_pad;
+
+        const m_step = (max_m - min_m) / 30; // ~30 grid points for performance
+        const b_step = (max_b - min_b) / 30;
+
+        for (let i = min_b; i <= max_b; i += b_step) b_vals.push(i);
+        for (let i = min_m; i <= max_m; i += m_step) m_vals.push(i);
+
+        for (let i = 0; i < b_vals.length; i++) {
+            const cost_row = [];
+            for (let j = 0; j < m_vals.length; j++) {
+                cost_row.push(calcCost(data, m_vals[j], b_vals[i]));
+            }
+            cost_grid.push(cost_row);
+        }
+        return { m_vals, b_vals, cost_grid };
+    };
+
+    return (
+        <div className="app-container">
+            <header>
+                <div className="title">Gradient Descent Playground</div>
+                <div className="subtitle">Visualizing Optimization for Linear Regression</div>
+            </header>
+
+            <div className="nav-tabs">
+                <div className={`nav-tab ${step === 1 ? 'active' : ''}`} onClick={() => {
+                    setStep(1); setTrueM("2.8"); setTrueB("0"); setData(generateData(2.8, 0)); resetModel();
+                }}>
+                    Step 1: 1D Search (Slope Only)
+                </div>
+                <div className={`nav-tab ${step === 2 ? 'active' : ''}`} onClick={() => {
+                    setStep(2); setTrueM("3.5"); setTrueB("1.8"); setData(generateData(3.5, 1.8)); resetModel();
+                }}>
+                    Step 2: 2D Search (Slope & Intercept)
+                </div>
+            </div>
+
+            <div className="layout-grid glass-panel">
+                {/* LEFT PANEL: Data & Fit */}
+                <div className="control-panel" style={{ borderRight: '1px solid var(--border-color)' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <h3 style={{ margin: 0, color: 'var(--accent)' }}>Data & Regression Fit</h3>
+                        <label style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.85rem', color: '#94a3b8', cursor: 'pointer' }}>
+                            <input type="checkbox" checked={showErrors} onChange={e => setShowErrors(e.target.checked)} style={{ accentColor: '#ef4444' }} />
+                            Show Errors
+                        </label>
+                    </div>
+                    <Plot
+                        data={[
+                            {
+                                x: xVals,
+                                y: yVals,
+                                mode: 'markers',
+                                type: 'scatter',
+                                marker: { color: '#3b82f6', size: 8 },
+                                name: 'Data Points'
+                            },
+                            {
+                                x: line_X,
+                                y: line_Y,
+                                mode: 'lines',
+                                type: 'scatter',
+                                line: { color: '#ef4444', width: 3 },
+                                name: 'Prediction'
+                            },
+                            ...(showErrors ? data.map((pt, i) => {
+                                const pred = m * pt.x + currentB;
+                                return {
+                                    x: [pt.x, pt.x],
+                                    y: [pt.y, pred],
+                                    mode: 'lines',
+                                    type: 'scatter',
+                                    line: { color: 'rgba(239, 68, 68, 0.5)', width: 1.5, dash: 'dash' },
+                                    showlegend: i === 0,
+                                    name: i === 0 ? 'Residual' : undefined,
+                                    hoverinfo: 'skip'
+                                };
+                            }) : [])
+                        ]}
+                        layout={{
+                            autosize: true,
+                            paper_bgcolor: 'transparent',
+                            plot_bgcolor: 'transparent',
+                            font: { color: '#e2e8f0' },
+                            margin: { t: 30, r: 20, l: 80, b: 80 },
+                            xaxis: { title: { text: 'x', standoff: 15 }, gridcolor: '#334155', automargin: true },
+                            yaxis: { title: { text: 'y', standoff: 15 }, gridcolor: '#334155', automargin: true }
+                        }}
+                        useResizeHandler={true}
+                        style={{ width: "100%", height: "350px" }}
+                    />
+
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+                        <div className="metric-card">
+                            <div className="metric-value">{m.toFixed(3)}</div>
+                            <div className="metric-label">Slope (m)</div>
+                        </div>
+                        {step === 2 && (
+                            <div className="metric-card">
+                                <div className="metric-value">{b.toFixed(3)}</div>
+                                <div className="metric-label">Intercept (b)</div>
+                            </div>
+                        )}
+                        <div className="metric-card">
+                            <div className="metric-value">{calcCost(data, m, step === 1 ? 0 : b).toFixed(3)}</div>
+                            <div className="metric-label">MSE (Cost)</div>
+                        </div>
+                    </div>
+
+                    <div style={{ marginTop: '1.5rem', padding: '1rem', background: 'rgba(0,0,0,0.2)', borderRadius: '8px', border: '1px solid var(--border-color)' }}>
+                        <h4 style={{ margin: '0 0 0.5rem 0', color: '#94a3b8' }}>Teacher Controls (Secret Truth)</h4>
+                        <div style={{ display: 'flex', gap: '1rem', alignItems: 'flex-end', flexWrap: 'wrap' }}>
+                            <div>
+                                <label style={{ display: 'block', fontSize: '0.8rem', color: '#94a3b8', marginBottom: '0.25rem' }}>True Slope</label>
+                                <input
+                                    type="password"
+                                    value={trueM}
+                                    onChange={e => setTrueM(e.target.value)}
+                                    style={{ width: '80px', background: 'transparent', border: '1px solid #334155', color: '#fff', padding: '0.5rem', borderRadius: '4px' }}
+                                />
+                            </div>
+                            {step === 2 && (
+                                <div>
+                                    <label style={{ display: 'block', fontSize: '0.8rem', color: '#94a3b8', marginBottom: '0.25rem' }}>True Intercept</label>
+                                    <input
+                                        type="password"
+                                        value={trueB}
+                                        onChange={e => setTrueB(e.target.value)}
+                                        style={{ width: '80px', background: 'transparent', border: '1px solid #334155', color: '#fff', padding: '0.5rem', borderRadius: '4px' }}
+                                    />
+                                </div>
+                            )}
+                            <button className="btn btn-secondary" onClick={regenerateData} style={{ padding: '0.5rem 1rem' }}>
+                                <RotateCcw size={16} /> Data
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                {/* RIGHT PANEL: Optimization Surface / Curve */}
+                <div className="control-panel">
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <h3 style={{ margin: 0, color: 'var(--accent)' }}>Cost Landscape</h3>
+                        <div style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
+                            {step === 2 && (
+                                <button className="btn btn-secondary" onClick={() => setShow3D(!show3D)} style={{ padding: '0.25rem 0.5rem', fontSize: '0.8rem' }}>
+                                    {show3D ? "Show 2D Contour" : "Show 3D Surface"}
+                                </button>
+                            )}
+                            {isPlaying && <div className="state-badge">Optimizing...</div>}
+                        </div>
+                    </div>
+
+                    {/* STEP 1 PLOT – always mounted, hidden when step !== 1 */}
+                    <div style={{ display: step === 1 ? 'block' : 'none' }}>
+                        {(() => {
+                            const costM = calcCost(data, m, 0);
+                            const curve = calc1DCurve();
+                            const maxCost = Math.max(...curve.cost_vals);
+                            const traces = [
+                                {
+                                    x: curve.m_vals,
+                                    y: curve.cost_vals,
+                                    mode: 'lines',
+                                    type: 'scatter',
+                                    line: { color: '#10b981', width: 2 },
+                                    name: 'Cost Function J(m)'
+                                },
+                                {
+                                    x: [m],
+                                    y: [costM],
+                                    mode: 'markers',
+                                    type: 'scatter',
+                                    marker: { color: '#ef4444', size: 10, symbol: 'diamond' },
+                                    name: 'Current m'
+                                }
+                            ];
+                            if (pendingGradient && step === 1) {
+                                const size = 2.0;
+                                traces.push({
+                                    x: [m - size, m + size],
+                                    y: [costM - size * pendingGradient.dj_dm, costM + size * pendingGradient.dj_dm],
+                                    mode: 'lines',
+                                    type: 'scatter',
+                                    line: { color: '#facc15', width: 4, dash: 'dot' },
+                                    name: 'Slope (Derivative)'
+                                });
+                            }
+                            return (
+                                <Plot
+                                    data={traces}
+                                    onClick={(evt) => handlePlotClick(evt, true)}
+                                    layout={{
+                                        showlegend: false,
+                                        autosize: true,
+                                        paper_bgcolor: 'transparent',
+                                        plot_bgcolor: 'transparent',
+                                        font: { color: '#e2e8f0' },
+                                        margin: { t: 30, r: 20, l: 80, b: 80 },
+                                        xaxis: { title: { text: 'm (slope)', standoff: 15 }, gridcolor: '#334155', range: [-2, 6], automargin: true },
+                                        yaxis: { title: { text: 'Cost J(m)', standoff: 15 }, gridcolor: '#334155', range: [0, maxCost * 1.05], automargin: true }
+                                    }}
+                                    useResizeHandler={true}
+                                    style={{ width: "100%", height: "350px" }}
+                                />
+                            );
+                        })()}
+                    </div>
+                    {/* STEP 2 CONTOUR – always mounted, hidden when not active */}
+                    <div style={{ display: (step === 2 && !show3D) ? 'block' : 'none' }}>
+                        {(() => {
+                            const surface = calc2DSurface();
+                            const traces = [
+                                {
+                                    z: surface.cost_grid,
+                                    x: surface.m_vals,
+                                    y: surface.b_vals,
+                                    type: 'contour',
+                                    colorscale: 'Viridis',
+                                    contours: { coloring: 'heatmap' },
+                                    name: 'Cost Surface'
+                                },
+                                {
+                                    x: history.map(h => h.m),
+                                    y: history.map(h => h.b),
+                                    mode: 'lines+markers',
+                                    type: 'scatter',
+                                    marker: { color: '#ef4444', size: 6 },
+                                    line: { color: '#ef4444', width: 2 },
+                                    name: 'Descent Path'
+                                }
+                            ];
+                            if (pendingGradient && step === 2) {
+                                const size = 2.0;
+                                traces.push({
+                                    x: [m, m - size * pendingGradient.dj_dm],
+                                    y: [b, b - size * pendingGradient.dj_db],
+                                    mode: 'lines',
+                                    type: 'scatter',
+                                    line: { color: '#facc15', width: 4, dash: 'dot' },
+                                    name: 'Gradient Direction'
+                                });
+                            }
+                            return (
+                                <Plot
+                                    data={traces}
+                                    onClick={(evt) => handlePlotClick(evt, false)}
+                                    layout={{
+                                        showlegend: false,
+                                        autosize: true,
+                                        paper_bgcolor: 'transparent',
+                                        plot_bgcolor: 'transparent',
+                                        font: { color: '#e2e8f0' },
+                                        margin: { t: 30, r: 20, l: 80, b: 80 },
+                                        xaxis: { title: { text: 'm (slope)', standoff: 15 }, automargin: true },
+                                        yaxis: { title: { text: 'b (intercept)', standoff: 15 }, automargin: true }
+                                    }}
+                                    useResizeHandler={true}
+                                    style={{ width: "100%", height: "350px" }}
+                                />
+                            );
+                        })()}
+                    </div>
+                    {/* STEP 2 3D SURFACE – always mounted, hidden when not active */}
+                    <div style={{ display: (step === 2 && show3D) ? 'block' : 'none' }}>
+                        {(() => {
+                            const surface = calc2DSurface();
+                            const traces = [
+                                {
+                                    z: surface.cost_grid,
+                                    x: surface.m_vals,
+                                    y: surface.b_vals,
+                                    type: 'surface',
+                                    colorscale: 'Viridis',
+                                    showscale: false,
+                                    name: 'Cost Surface',
+                                    hovertemplate: 'm: %{x:.3f}<br>b: %{y:.3f}<br>cost: %{z:.2f}<extra></extra>'
+                                },
+                                {
+                                    x: history.map(h => h.m),
+                                    y: history.map(h => h.b),
+                                    z: history.map(h => h.cost + 1),
+                                    mode: 'lines+markers',
+                                    type: 'scatter3d',
+                                    marker: { color: '#ef4444', size: 4 },
+                                    line: { color: '#ef4444', width: 4 },
+                                    name: 'Descent Path',
+                                    hovertemplate: 'm: %{x:.3f}<br>b: %{y:.3f}<br>cost: %{z:.2f}<extra></extra>'
+                                }
+                            ];
+                            if (pendingGradient && step === 2) {
+                                const arrowLen = 1.5;
+                                const gradMag = Math.sqrt(
+                                    pendingGradient.dj_dm ** 2 + pendingGradient.dj_db ** 2
+                                ) || 1;
+                                const dm_n = (pendingGradient.dj_dm / gradMag) * arrowLen;
+                                const db_n = (pendingGradient.dj_db / gradMag) * arrowLen;
+                                const J0 = calcCost(data, m, b);
+                                const J1 = calcCost(data, m - dm_n, b - db_n);
+                                const nDashes = 12;
+                                const gx = [], gy = [], gz = [];
+                                for (let i = 0; i <= nDashes; i++) {
+                                    if (i % 2 === 0) {
+                                        const t1 = i / nDashes;
+                                        const t2 = (i + 1) / nDashes;
+                                        gx.push(m - dm_n * t1, m - dm_n * t2, null);
+                                        gy.push(b - db_n * t1, b - db_n * t2, null);
+                                        gz.push(J0 + (J1 - J0) * t1, J0 + (J1 - J0) * t2, null);
+                                    }
+                                }
+                                traces.push({
+                                    x: gx, y: gy, z: gz,
+                                    mode: 'lines',
+                                    type: 'scatter3d',
+                                    line: { color: '#facc15', width: 6 },
+                                    name: 'Gradient Direction'
+                                });
+                            }
+                            return (
+                                <Plot
+                                    data={traces}
+                                    onClick={(evt) => handlePlotClick(evt, false)}
+                                    layout={{
+                                        showlegend: false,
+                                        autosize: true,
+                                        uirevision: 'keep-camera',
+                                        paper_bgcolor: 'transparent',
+                                        plot_bgcolor: 'transparent',
+                                        font: { color: '#e2e8f0' },
+                                        margin: { t: 0, r: 0, l: 0, b: 0 },
+                                        scene: {
+                                            xaxis: { title: { text: 'm' } },
+                                            yaxis: { title: { text: 'b' } },
+                                            zaxis: { title: { text: 'cost' } }
+                                        }
+                                    }}
+                                    useResizeHandler={true}
+                                    style={{ width: "100%", height: "350px" }}
+                                />
+                            );
+                        })()}
+                    </div>
+
+                    <div style={{ display: 'flex', gap: '1rem', marginTop: 'auto' }}>
+                        <button className="btn" onClick={() => { setIsPlaying(!isPlaying); setPendingGradient(null); }}>
+                            {isPlaying ? <Pause size={18} /> : <Play size={18} />}
+                            {isPlaying ? "Pause" : "Play"}
+                        </button>
+                        <button className="btn btn-secondary" onClick={handleManualStep} disabled={isPlaying}>
+                            <FastForward size={18} /> {pendingGradient ? "Apply Step" : "Show Slope"}
+                        </button>
+                        <button className="btn btn-secondary" onClick={resetModel}>
+                            <RotateCcw size={18} /> Reset
+                        </button>
+                    </div>
+
+                    <div className="slider-container" style={{ marginTop: '1rem' }}>
+                        <div className="slider-header">
+                            <span>Learning Rate (Log Scale): {Number(lr).toFixed(4)}</span>
+                        </div>
+                        <input
+                            type="range"
+                            min="-3"
+                            max={Math.log10(0.5)}
+                            step="0.01"
+                            value={Math.log10(lr || 0.001)}
+                            onChange={(e) => setLr(parseFloat(Math.pow(10, parseFloat(e.target.value)).toFixed(4)))}
+                        />
+                    </div>
+                </div>
+            </div>
+        </div>
+    );
+}

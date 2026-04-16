@@ -1,0 +1,25 @@
+{
+  "name": "gradient-descent-playground",
+  "version": "1.0.0",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "dev": "vite"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "",
+  "dependencies": {
+    "framer-motion": "^12.38.0",
+    "lucide-react": "^1.8.0",
+    "plotly.js-dist-min": "^3.5.0",
+    "react": "^19.2.5",
+    "react-dom": "^19.2.5",
+    "react-plotly.js": "^2.6.0"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.7.0",
+    "vite": "^6.4.2"
+  }
+}
