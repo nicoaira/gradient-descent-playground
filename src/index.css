@@ -9,6 +9,8 @@
   --border-color: rgba(255, 255, 255, 0.1);
   --grid-color: #334155;
   --nav-bg: rgba(15, 23, 42, 0.5);
+  --card-bg: rgba(0, 0, 0, 0.2);
+  --input-border: #334155;
   font-family: 'Inter', system-ui, -apple-system, sans-serif;
 }
 
@@ -20,6 +22,8 @@
   --border-color: rgba(0, 0, 0, 0.1);
   --grid-color: #cbd5e1;
   --nav-bg: rgba(226, 232, 240, 0.5);
+  --card-bg: #ffffff;
+  --input-border: #cbd5e1;
 }
 
 body {
@@ -208,11 +212,12 @@ input[type=range]::-webkit-slider-runnable-track {
 }
 
 .metric-card {
-  background: rgba(0, 0, 0, 0.2);
+  background: var(--card-bg);
   border: 1px solid var(--border-color);
   padding: 1rem;
   border-radius: 12px;
   text-align: center;
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
 }
 
 .metric-value {

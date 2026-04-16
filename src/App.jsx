@@ -355,7 +355,7 @@ export default function App() {
                         </div>
                     </div>
 
-                    <div style={{ marginTop: '1.5rem', padding: '1rem', background: 'rgba(0,0,0,0.2)', borderRadius: '8px', border: '1px solid var(--border-color)' }}>
+                    <div style={{ marginTop: '1.5rem', padding: '1rem', background: 'var(--card-bg)', borderRadius: '12px', border: '1px solid var(--border-color)', boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)' }}>
                         <h4 style={{ margin: '0 0 0.5rem 0', color: '#94a3b8' }}>Teacher Controls (Secret Truth)</h4>
                         <div style={{ display: 'flex', gap: '1rem', alignItems: 'flex-end', flexWrap: 'wrap' }}>
                             <div>
@@ -364,7 +364,7 @@ export default function App() {
                                     type="password"
                                     value={trueM}
                                     onChange={e => setTrueM(e.target.value)}
-                                    style={{ width: '80px', background: 'transparent', border: '1px solid #334155', color: '#fff', padding: '0.5rem', borderRadius: '4px' }}
+                                    style={{ width: '80px', background: 'var(--bg-color)', border: '1px solid var(--input-border)', color: 'var(--text-color)', padding: '0.5rem', borderRadius: '4px' }}
                                 />
                             </div>
                             {step === 2 && (
@@ -374,7 +374,7 @@ export default function App() {
                                         type="password"
                                         value={trueB}
                                         onChange={e => setTrueB(e.target.value)}
-                                        style={{ width: '80px', background: 'transparent', border: '1px solid #334155', color: '#fff', padding: '0.5rem', borderRadius: '4px' }}
+                                        style={{ width: '80px', background: 'var(--bg-color)', border: '1px solid var(--input-border)', color: 'var(--text-color)', padding: '0.5rem', borderRadius: '4px' }}
                                     />
                                 </div>
                             )}
