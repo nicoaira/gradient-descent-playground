@@ -56,6 +56,9 @@ export default function App() {
     // Tracing the path of gradient descent
     const [history, setHistory] = useState([{ m: 0, b: 0, cost: calcCost(data, 0, 0) }]);
 
+    // Track the viewport of the 1D plot to keep curve "infinite"
+    const [mView, setMView] = useState({ min: -2, max: 6 });
+
     const [theme, setTheme] = useState('dark');
 
     useEffect(() => {
@@ -200,11 +203,15 @@ export default function App() {
     const line_Y = [currentB, m * max_X + currentB];
 
     // 1D Cost Curve Setup (Cost vs m, assuming b=0)
+    // 1D Cost Curve Setup (Cost vs m, assuming b=0)
     const calc1DCurve = () => {
         const m_vals = [];
         const cost_vals = [];
-        // Wide range to support zooming out
-        for (let i = -100; i <= 100; i += 0.5) {
+        const span = mView.max - mView.min;
+        const step = span / 100; // 100 points is enough for a smooth parabola
+
+        // Draw slightly beyond the view to avoid edges during panning
+        for (let i = mView.min - span; i <= mView.max + span; i += step) {
             m_vals.push(i);
             cost_vals.push(calcCost(data, i, 0));
         }
@@ -440,6 +447,13 @@ export default function App() {
                                 <Plot
                                     data={traces}
                                     onClick={(evt) => handlePlotClick(evt, true)}
+                                    onRelayout={(ed) => {
+                                        if (ed['xaxis.range[0]'] !== undefined) {
+                                            setMView({ min: ed['xaxis.range[0]'], max: ed['xaxis.range[1]'] });
+                                        } else if (ed['xaxis.autorange']) {
+                                            setMView({ min: -2, max: 6 });
+                                        }
+                                    }}
                                     layout={{
                                         showlegend: false,
                                         uirevision: 'keep-zoom',
@@ -448,8 +462,8 @@ export default function App() {
                                         plot_bgcolor: 'transparent',
                                         font: { color: pTheme.fontColor },
                                         margin: { t: 30, r: 20, l: 80, b: 80 },
-                                        xaxis: { title: { text: 'm (slope)', standoff: 15 }, gridcolor: pTheme.gridColor, range: [-2, 6], automargin: true },
-                                        yaxis: { title: { text: 'Cost J(m)', standoff: 15 }, gridcolor: pTheme.gridColor, range: [-maxCost * 0.05, maxCost * 1.05], automargin: true }
+                                        xaxis: { title: { text: 'm (slope)', standoff: 15 }, gridcolor: pTheme.gridColor, automargin: true },
+                                        yaxis: { title: { text: 'Cost J(m)', standoff: 15 }, gridcolor: pTheme.gridColor, automargin: true }
                                     }}
                                     useResizeHandler={true}
                                     style={{ width: "100%", height: "350px" }}
