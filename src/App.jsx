@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import Plotly from 'plotly.js-dist-min';
 import createPlotlyComponent from 'react-plotly.js/factory';
-import { Play, Pause, FastForward, RotateCcw, BrainCircuit } from 'lucide-react';
+import { Play, Pause, FastForward, RotateCcw, BrainCircuit, Sun, Moon } from 'lucide-react';
 
 // Plotly.js 3+ often crashes in React 19 during unmount due to strict DOM detachments.
 // Wrapping its purge method protects the app from unmount crashes.
@@ -55,6 +55,17 @@ export default function App() {
 
     // Tracing the path of gradient descent
     const [history, setHistory] = useState([{ m: 0, b: 0, cost: calcCost(data, 0, 0) }]);
+
+    const [theme, setTheme] = useState('dark');
+
+    useEffect(() => {
+        document.documentElement.setAttribute('data-theme', theme);
+    }, [theme]);
+
+    const pTheme = {
+        fontColor: theme === 'dark' ? '#e2e8f0' : '#1e293b',
+        gridColor: theme === 'dark' ? '#334155' : '#cbd5e1'
+    };
 
     // Reference for the animation loop
     const requestRef = useRef();
@@ -244,9 +255,19 @@ export default function App() {
 
     return (
         <div className="app-container">
-            <header>
-                <div className="title">Gradient Descent Playground</div>
-                <div className="subtitle">Visualizing Optimization for Linear Regression</div>
+            <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                <div>
+                    <div className="title">Gradient Descent Playground</div>
+                    <div className="subtitle">Visualizing Optimization for Linear Regression</div>
+                </div>
+                <button
+                    className="btn btn-secondary"
+                    onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
+                    style={{ padding: '0.6rem', borderRadius: '50%', width: '42px', height: '42px', justifyContent: 'center' }}
+                    title={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`}
+                >
+                    {theme === 'dark' ? <Sun size={20} /> : <Moon size={20} />}
+                </button>
             </header>
 
             <div className="nav-tabs">
@@ -308,10 +329,10 @@ export default function App() {
                             autosize: true,
                             paper_bgcolor: 'transparent',
                             plot_bgcolor: 'transparent',
-                            font: { color: '#e2e8f0' },
+                            font: { color: pTheme.fontColor },
                             margin: { t: 30, r: 20, l: 80, b: 80 },
-                            xaxis: { title: { text: 'x', standoff: 15 }, gridcolor: '#334155', automargin: true },
-                            yaxis: { title: { text: 'y', standoff: 15 }, gridcolor: '#334155', automargin: true }
+                            xaxis: { title: { text: 'x', standoff: 15 }, gridcolor: pTheme.gridColor, automargin: true },
+                            yaxis: { title: { text: 'y', standoff: 15 }, gridcolor: pTheme.gridColor, automargin: true }
                         }}
                         useResizeHandler={true}
                         style={{ width: "100%", height: "350px" }}
@@ -422,10 +443,10 @@ export default function App() {
                                         autosize: true,
                                         paper_bgcolor: 'transparent',
                                         plot_bgcolor: 'transparent',
-                                        font: { color: '#e2e8f0' },
+                                        font: { color: pTheme.fontColor },
                                         margin: { t: 30, r: 20, l: 80, b: 80 },
-                                        xaxis: { title: { text: 'm (slope)', standoff: 15 }, gridcolor: '#334155', range: [-2, 6], automargin: true },
-                                        yaxis: { title: { text: 'Cost J(m)', standoff: 15 }, gridcolor: '#334155', range: [0, maxCost * 1.05], automargin: true }
+                                        xaxis: { title: { text: 'm (slope)', standoff: 15 }, gridcolor: pTheme.gridColor, range: [-2, 6], automargin: true },
+                                        yaxis: { title: { text: 'Cost J(m)', standoff: 15 }, gridcolor: pTheme.gridColor, range: [0, maxCost * 1.05], automargin: true }
                                     }}
                                     useResizeHandler={true}
                                     style={{ width: "100%", height: "350px" }}
@@ -477,10 +498,10 @@ export default function App() {
                                         autosize: true,
                                         paper_bgcolor: 'transparent',
                                         plot_bgcolor: 'transparent',
-                                        font: { color: '#e2e8f0' },
+                                        font: { color: pTheme.fontColor },
                                         margin: { t: 30, r: 20, l: 80, b: 80 },
-                                        xaxis: { title: { text: 'm (slope)', standoff: 15 }, automargin: true },
-                                        yaxis: { title: { text: 'b (intercept)', standoff: 15 }, automargin: true }
+                                        xaxis: { title: { text: 'm (slope)', standoff: 15 }, gridcolor: pTheme.gridColor, automargin: true },
+                                        yaxis: { title: { text: 'b (intercept)', standoff: 15 }, gridcolor: pTheme.gridColor, automargin: true }
                                     }}
                                     useResizeHandler={true}
                                     style={{ width: "100%", height: "350px" }}
@@ -553,12 +574,12 @@ export default function App() {
                                         uirevision: 'keep-camera',
                                         paper_bgcolor: 'transparent',
                                         plot_bgcolor: 'transparent',
-                                        font: { color: '#e2e8f0' },
+                                        font: { color: pTheme.fontColor },
                                         margin: { t: 0, r: 0, l: 0, b: 0 },
                                         scene: {
-                                            xaxis: { title: { text: 'm' } },
-                                            yaxis: { title: { text: 'b' } },
-                                            zaxis: { title: { text: 'cost' } }
+                                            xaxis: { title: { text: 'm' }, gridcolor: pTheme.gridColor },
+                                            yaxis: { title: { text: 'b' }, gridcolor: pTheme.gridColor },
+                                            zaxis: { title: { text: 'cost' }, gridcolor: pTheme.gridColor }
                                         }
                                     }}
                                     useResizeHandler={true}

@@ -7,7 +7,19 @@
   --accent: #10b981;
   --panel-bg: rgba(30, 41, 59, 0.7);
   --border-color: rgba(255, 255, 255, 0.1);
+  --grid-color: #334155;
+  --nav-bg: rgba(15, 23, 42, 0.5);
   font-family: 'Inter', system-ui, -apple-system, sans-serif;
+}
+
+[data-theme='light'] {
+  --bg-color: #f8fafc;
+  --text-color: #1e293b;
+  --secondary: #e2e8f0;
+  --panel-bg: rgba(255, 255, 255, 0.8);
+  --border-color: rgba(0, 0, 0, 0.1);
+  --grid-color: #cbd5e1;
+  --nav-bg: rgba(226, 232, 240, 0.5);
 }
 
 body {
@@ -40,6 +52,7 @@ body {
   font-weight: 800;
   background: linear-gradient(135deg, #60a5fa, #a78bfa);
   -webkit-background-clip: text;
+  background-clip: text;
   -webkit-text-fill-color: transparent;
   margin-bottom: 0.5rem;
 }
@@ -81,7 +94,7 @@ body {
 }
 
 .btn-secondary:hover {
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--nav-bg);
   box-shadow: none;
 }
 
@@ -117,12 +130,14 @@ body {
 
 input[type=range] {
   -webkit-appearance: none;
+  appearance: none;
   width: 100%;
   background: transparent;
 }
 
 input[type=range]::-webkit-slider-thumb {
   -webkit-appearance: none;
+  appearance: none;
   height: 16px;
   width: 16px;
   border-radius: 50%;
@@ -155,7 +170,7 @@ input[type=range]::-webkit-slider-runnable-track {
   display: flex;
   gap: 1rem;
   padding: 0.5rem;
-  background: rgba(15, 23, 42, 0.5);
+  background: var(--nav-bg);
   border-radius: 12px;
   width: fit-content;
 }
@@ -203,7 +218,7 @@ input[type=range]::-webkit-slider-runnable-track {
 .metric-value {
   font-size: 1.5rem;
   font-weight: 700;
-  color: #f8fafc;
+  color: var(--text-color);
   font-family: monospace;
 }
 
