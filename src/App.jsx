@@ -544,12 +544,12 @@ export default function App() {
                         </div>
                     ) : (
                         <div style={{ marginTop: '1.5rem', padding: '1rem', background: 'var(--card-bg)', borderRadius: '12px', border: '1px solid var(--border-color)', boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)' }}>
-                            <h4 style={{ margin: '0 0 0.5rem 0', color: '#94a3b8' }}>Teacher Controls (Secret Truth)</h4>
+                            <h4 style={{ margin: '0 0 0.5rem 0', color: '#94a3b8' }}>Set Values</h4>
                             <div style={{ display: 'flex', gap: '1rem', alignItems: 'flex-end', flexWrap: 'wrap' }}>
                                 <div>
                                     <label style={{ display: 'block', fontSize: '0.8rem', color: '#94a3b8', marginBottom: '0.25rem' }}>True Slope</label>
                                     <input
-                                        type="password"
+                                        type="text"
                                         value={trueM}
                                         onChange={e => setTrueM(e.target.value)}
                                         style={{ width: '80px', background: 'var(--bg-color)', border: '1px solid var(--input-border)', color: 'var(--text-color)', padding: '0.5rem', borderRadius: '4px' }}
@@ -559,7 +559,7 @@ export default function App() {
                                     <div>
                                         <label style={{ display: 'block', fontSize: '0.8rem', color: '#94a3b8', marginBottom: '0.25rem' }}>True Intercept</label>
                                         <input
-                                            type="password"
+                                            type="text"
                                             value={trueB}
                                             onChange={e => setTrueB(e.target.value)}
                                             style={{ width: '80px', background: 'var(--bg-color)', border: '1px solid var(--input-border)', color: 'var(--text-color)', padding: '0.5rem', borderRadius: '4px' }}
