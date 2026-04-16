@@ -1,8 +1,69 @@
 import React, { useState, useEffect, useRef } from 'react';
 import Plotly from 'plotly.js-dist-min';
 import createPlotlyComponent from 'react-plotly.js/factory';
-import { Play, Pause, FastForward, RotateCcw, BrainCircuit, Sun, Moon } from 'lucide-react';
+import { Play, Pause, FastForward, RotateCcw, BrainCircuit, Sun, Moon, Eye, EyeOff, ChevronLeft, ChevronRight } from 'lucide-react';
 import { MLP, generateClassificationData } from './MLP';
+
+// Step 4: Hardcoded classification data. Class 1 clusters around (3.3, 3.5),
+// class 0 surrounds it — with three noisy class-0 points inside the cluster.
+const TRAIN_DATA_4 = [
+    // Class 0 — surrounding "X" points
+    { x: 0.5, y: 0.5, label: 0 }, { x: 1.5, y: 1.0, label: 0 },
+    { x: 1.0, y: 2.0, label: 0 }, { x: 2.0, y: 0.5, label: 0 },
+    { x: 3.0, y: 1.0, label: 0 }, { x: 4.0, y: 1.5, label: 0 },
+    { x: 5.0, y: 0.5, label: 0 }, { x: 0.5, y: 3.0, label: 0 },
+    { x: 0.5, y: 4.5, label: 0 }, { x: 1.5, y: 5.0, label: 0 },
+    { x: 5.5, y: 2.0, label: 0 }, { x: 5.5, y: 5.0, label: 0 },
+    { x: 4.5, y: 5.5, label: 0 }, { x: 2.5, y: 5.5, label: 0 },
+    { x: 0.5, y: 2.0, label: 0 }, { x: 4.0, y: 0.5, label: 0 },
+    { x: 5.3, y: 2.5, label: 0 }, { x: 5.5, y: 4.0, label: 0 },
+    { x: 1.0, y: 5.5, label: 0 }, { x: 3.5, y: 5.5, label: 0 },
+    // Class 0 — noise points that fell inside the class-1 cluster
+    { x: 3.0, y: 3.5, label: 0 }, { x: 3.8, y: 2.8, label: 0 },
+    { x: 2.8, y: 4.2, label: 0 },
+    // Class 1 — "O" cluster near center
+    { x: 2.5, y: 4.0, label: 1 }, { x: 3.8, y: 3.2, label: 1 },
+    { x: 3.0, y: 4.5, label: 1 }, { x: 4.2, y: 4.0, label: 1 },
+    { x: 2.0, y: 3.5, label: 1 }, { x: 3.5, y: 2.5, label: 1 },
+    { x: 4.5, y: 3.5, label: 1 }, { x: 2.8, y: 2.8, label: 1 },
+    { x: 4.0, y: 4.5, label: 1 }, { x: 3.3, y: 3.8, label: 1 },
+    { x: 2.3, y: 3.0, label: 1 }, { x: 4.5, y: 2.5, label: 1 },
+    { x: 3.8, y: 4.3, label: 1 }, { x: 3.5, y: 3.0, label: 1 },
+    { x: 2.5, y: 2.5, label: 1 }
+];
+const VAL_DATA_4 = [
+    { x: 1.0, y: 1.5, label: 0 }, { x: 5.0, y: 1.0, label: 0 },
+    { x: 1.0, y: 4.0, label: 0 }, { x: 5.3, y: 4.5, label: 0 },
+    { x: 5.3, y: 4.2, label: 0 }, { x: 2.0, y: 5.2, label: 0 },
+    { x: 2.5, y: 3.5, label: 1 }, { x: 3.5, y: 4.0, label: 1 },
+    // These four sit on top of the class-0 noise points — overfit misses them.
+    { x: 4.0, y: 3.0, label: 1 }, { x: 3.1, y: 3.5, label: 1 },
+    { x: 3.9, y: 2.7, label: 1 }, { x: 2.9, y: 4.1, label: 1 }
+];
+
+// Three pretrained decision boundaries.
+const modelUnderfit = (x, y) => (x + y > 4.5 ? 1 : 0);
+const modelGood = (x, y) => ((x - 3.3) ** 2 + (y - 3.5) ** 2 < 4 ? 1 : 0);
+const modelOverfit = (x, y) => {
+    if ((x - 3.3) ** 2 + (y - 3.5) ** 2 >= 4) return 0;
+    // Carve out the three class-0 noise points inside the cluster.
+    if ((x - 3.0) ** 2 + (y - 3.5) ** 2 < 0.1) return 0;
+    if ((x - 3.8) ** 2 + (y - 2.8) ** 2 < 0.1) return 0;
+    if ((x - 2.8) ** 2 + (y - 4.2) ** 2 < 0.1) return 0;
+    return 1;
+};
+
+const accuracy = (model, data) => {
+    let ok = 0;
+    for (const pt of data) if (model(pt.x, pt.y) === pt.label) ok++;
+    return ok / data.length;
+};
+
+const MODELS_4 = [
+    { key: 'underfit', name: 'Under-fitting', color: '#ef4444', predict: modelUnderfit, description: 'Too simple — a straight line can\'t carve out the center cluster.' },
+    { key: 'good', name: 'Appropriate Fit', color: '#10b981', predict: modelGood, description: 'Captures the cluster shape cleanly without contorting around noise.' },
+    { key: 'overfit', name: 'Over-fitting', color: '#a855f7', predict: modelOverfit, description: 'Carves tight regions around every training point — even the mislabeled noise.' }
+];
 
 // Plotly.js 3+ often crashes in React 19 during unmount due to strict DOM detachments.
 // Wrapping its purge method protects the app from unmount crashes.
@@ -70,6 +131,10 @@ export default function App() {
     const [nnLossHistory, setNnLossHistory] = useState([]);
 
     const [showProbSurface, setShowProbSurface] = useState(false);
+
+    // Step 4 (Train/Validation) state
+    const [revealValidation, setRevealValidation] = useState(false);
+    const [selectedModel4, setSelectedModel4] = useState(1); // start on "Appropriate Fit"
 
     const [theme, setTheme] = useState('dark');
 
@@ -361,26 +426,129 @@ export default function App() {
                 }}>
                     Step 3: Neural Network (Classification)
                 </div>
+                <div className={`nav-tab ${step === 4 ? 'active' : ''}`} onClick={() => {
+                    setStep(4); setIsPlaying(false); setRevealValidation(false);
+                }}>
+                    Step 4: Train / Validation Split
+                </div>
             </div>
 
             <div className="layout-grid glass-panel">
                 {/* LEFT PANEL: Data & Fit */}
                 <div className="control-panel" style={{ borderRight: '1px solid var(--border-color)' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                        <h3 style={{ margin: 0, color: 'var(--accent)' }}>{step === 3 ? "Decision Boundary" : "Data & Regression Fit"}</h3>
-                        {step !== 3 ? (
-                            <label style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.85rem', color: '#94a3b8', cursor: 'pointer' }}>
-                                <input type="checkbox" checked={showErrors} onChange={e => setShowErrors(e.target.checked)} style={{ accentColor: '#ef4444' }} />
-                                Show Errors
-                            </label>
-                        ) : (
+                        <h3 style={{ margin: 0, color: 'var(--accent)' }}>
+                            {step === 3 ? "Decision Boundary" : step === 4 ? "Three Pretrained Models" : "Data & Regression Fit"}
+                        </h3>
+                        {step === 3 ? (
                             <label style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.85rem', color: '#94a3b8', cursor: 'pointer', userSelect: 'none' }}>
                                 <input type="checkbox" checked={showProbSurface} onChange={e => setShowProbSurface(e.target.checked)} style={{ accentColor: '#3b82f6' }} />
                                 Prob. Surface
                             </label>
+                        ) : step === 4 ? null : (
+                            <label style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.85rem', color: '#94a3b8', cursor: 'pointer' }}>
+                                <input type="checkbox" checked={showErrors} onChange={e => setShowErrors(e.target.checked)} style={{ accentColor: '#ef4444' }} />
+                                Show Errors
+                            </label>
                         )}
                     </div>
-                    {step === 3 ? (
+                    {step === 4 ? (
+                        (() => {
+                            const active = MODELS_4[selectedModel4];
+                            const gridX = [];
+                            const gridY = [];
+                            for (let i = 0; i <= 6; i += 0.06) { gridX.push(Number(i.toFixed(2))); gridY.push(Number(i.toFixed(2))); }
+                            const gridZ = gridY.map(yv => gridX.map(xv => active.predict(xv, yv)));
+
+                            const trainClass0 = TRAIN_DATA_4.filter(d => d.label === 0);
+                            const trainClass1 = TRAIN_DATA_4.filter(d => d.label === 1);
+                            const valClass0 = VAL_DATA_4.filter(d => d.label === 0);
+                            const valClass1 = VAL_DATA_4.filter(d => d.label === 1);
+
+                            return (
+                                <>
+                                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '1rem', marginTop: '-0.25rem' }}>
+                                        <button
+                                            className="btn btn-secondary"
+                                            onClick={() => setSelectedModel4((selectedModel4 + MODELS_4.length - 1) % MODELS_4.length)}
+                                            style={{ padding: '0.4rem', borderRadius: '50%', width: '36px', height: '36px', justifyContent: 'center' }}
+                                            title="Previous model"
+                                        >
+                                            <ChevronLeft size={18} />
+                                        </button>
+                                        <div style={{ minWidth: '200px', textAlign: 'center' }}>
+                                            <div style={{ color: active.color, fontWeight: 700, fontSize: '1.15rem' }}>{active.name}</div>
+                                            <div style={{ color: '#94a3b8', fontSize: '0.75rem' }}>{selectedModel4 + 1} of {MODELS_4.length}</div>
+                                        </div>
+                                        <button
+                                            className="btn btn-secondary"
+                                            onClick={() => setSelectedModel4((selectedModel4 + 1) % MODELS_4.length)}
+                                            style={{ padding: '0.4rem', borderRadius: '50%', width: '36px', height: '36px', justifyContent: 'center' }}
+                                            title="Next model"
+                                        >
+                                            <ChevronRight size={18} />
+                                        </button>
+                                    </div>
+                                    <Plot
+                                        data={[
+                                            {
+                                                z: gridZ, x: gridX, y: gridY,
+                                                type: 'contour',
+                                                colorscale: [
+                                                    [0, 'rgba(34, 197, 94, 0.25)'],
+                                                    [0.5, 'rgba(255, 255, 255, 0)'],
+                                                    [1, 'rgba(234, 179, 8, 0.25)']
+                                                ],
+                                                showscale: false,
+                                                hoverinfo: 'skip',
+                                                contours: { coloring: 'heatmap' },
+                                                line: { color: active.color, width: 2 }
+                                            },
+                                            {
+                                                x: trainClass0.map(d => d.x), y: trainClass0.map(d => d.y),
+                                                mode: 'markers', type: 'scatter',
+                                                marker: { color: '#22c55e', size: 14, symbol: 'x', line: { width: 2 } },
+                                                name: 'Train · Class 0'
+                                            },
+                                            {
+                                                x: trainClass1.map(d => d.x), y: trainClass1.map(d => d.y),
+                                                mode: 'markers', type: 'scatter',
+                                                marker: { color: '#eab308', size: 13, symbol: 'circle-open', line: { width: 3 } },
+                                                name: 'Train · Class 1'
+                                            },
+                                            ...(revealValidation ? [
+                                                {
+                                                    x: valClass0.map(d => d.x), y: valClass0.map(d => d.y),
+                                                    mode: 'markers', type: 'scatter',
+                                                    marker: { color: '#22c55e', size: 17, symbol: 'x', line: { width: 3, color: '#ffffff' } },
+                                                    name: 'Val · Class 0'
+                                                },
+                                                {
+                                                    x: valClass1.map(d => d.x), y: valClass1.map(d => d.y),
+                                                    mode: 'markers', type: 'scatter',
+                                                    marker: { color: '#eab308', size: 16, symbol: 'circle-open', line: { width: 4, color: '#ffffff' } },
+                                                    name: 'Val · Class 1'
+                                                }
+                                            ] : [])
+                                        ]}
+                                        layout={{
+                                            autosize: true,
+                                            showlegend: true,
+                                            legend: { orientation: 'h', y: -0.18, x: 0.5, xanchor: 'center', font: { size: 10 } },
+                                            paper_bgcolor: 'transparent',
+                                            plot_bgcolor: 'transparent',
+                                            font: { color: pTheme.fontColor },
+                                            margin: { t: 10, r: 20, l: 50, b: 70 },
+                                            xaxis: { title: { text: 'x1' }, gridcolor: pTheme.gridColor, automargin: true, range: [0, 6], fixedrange: true },
+                                            yaxis: { title: { text: 'x2' }, gridcolor: pTheme.gridColor, automargin: true, range: [0, 6], fixedrange: true }
+                                        }}
+                                        useResizeHandler={true}
+                                        style={{ width: "100%", height: "350px" }}
+                                    />
+                                </>
+                            );
+                        })()
+                    ) : step === 3 ? (
                         <Plot
                             data={[
                                 {
@@ -472,26 +640,37 @@ export default function App() {
                         />
                     )}
 
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
-                        <div className="metric-card">
-                            <div className="metric-value">{step === 3 ? nnLoss.toFixed(4) : m.toFixed(3)}</div>
-                            <div className="metric-label">{step === 3 ? 'Cross Entropy Loss' : 'Slope (m)'}</div>
+                    {step !== 4 && (
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+                            <div className="metric-card">
+                                <div className="metric-value">{step === 3 ? nnLoss.toFixed(4) : m.toFixed(3)}</div>
+                                <div className="metric-label">{step === 3 ? 'Cross Entropy Loss' : 'Slope (m)'}</div>
+                            </div>
+                            {step === 2 && (
+                                <div className="metric-card">
+                                    <div className="metric-value">{b.toFixed(3)}</div>
+                                    <div className="metric-label">Intercept (b)</div>
+                                </div>
+                            )}
+                            {step !== 3 && (
+                                <div className="metric-card">
+                                    <div className="metric-value">{calcCost(data, m, step === 1 ? 0 : b).toFixed(3)}</div>
+                                    <div className="metric-label">MSE (Cost)</div>
+                                </div>
+                            )}
                         </div>
-                        {step === 2 && (
-                            <div className="metric-card">
-                                <div className="metric-value">{b.toFixed(3)}</div>
-                                <div className="metric-label">Intercept (b)</div>
-                            </div>
-                        )}
-                        {step !== 3 && (
-                            <div className="metric-card">
-                                <div className="metric-value">{calcCost(data, m, step === 1 ? 0 : b).toFixed(3)}</div>
-                                <div className="metric-label">MSE (Cost)</div>
-                            </div>
-                        )}
-                    </div>
+                    )}
 
-                    {step === 3 ? (
+                    {step === 4 ? (
+                        <div style={{ marginTop: '0.5rem', padding: '1rem', background: 'var(--card-bg)', borderRadius: '12px', border: '1px solid var(--border-color)', fontSize: '0.88rem', color: '#94a3b8', lineHeight: 1.5 }}>
+                            <div style={{ marginBottom: '0.5rem' }}>
+                                <strong style={{ color: MODELS_4[selectedModel4].color }}>{MODELS_4[selectedModel4].name}:</strong> {MODELS_4[selectedModel4].description}
+                            </div>
+                            <div style={{ fontSize: '0.82rem', paddingTop: '0.5rem', borderTop: '1px solid var(--border-color)' }}>
+                                Three models were pretrained only on the <span style={{ color: '#3b82f6' }}>training set</span>. Training accuracy alone can't tell if they'll generalize — use the <span style={{ color: '#f59e0b' }}>validation set</span> to find out.
+                            </div>
+                        </div>
+                    ) : step === 3 ? (
                         <div style={{ marginTop: '1.5rem', padding: '1rem', background: 'var(--card-bg)', borderRadius: '12px', border: '1px solid var(--border-color)', boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)' }}>
                             <h4 style={{ margin: '0 0 0.75rem 0', color: '#94a3b8' }}>Network Architecture (Complexity)</h4>
                             <div style={{ marginBottom: '1rem' }}>
@@ -577,7 +756,9 @@ export default function App() {
                 {/* RIGHT PANEL: Optimization Surface / Curve */}
                 <div className="control-panel">
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                        <h3 style={{ margin: 0, color: 'var(--accent)' }}>{step === 3 ? "Learning Curve" : "Cost Landscape"}</h3>
+                        <h3 style={{ margin: 0, color: 'var(--accent)' }}>
+                            {step === 3 ? "Learning Curve" : step === 4 ? "Train vs Validation Loss" : "Cost Landscape"}
+                        </h3>
                         <div style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
                             {step === 2 && (
                                 <button className="btn btn-secondary" onClick={() => setShow3D(!show3D)} style={{ padding: '0.25rem 0.5rem', fontSize: '0.8rem' }}>
@@ -787,6 +968,47 @@ export default function App() {
                         })()}
                     </div>
 
+                    {/* STEP 4 - Train vs Validation Accuracy Cards */}
+                    <div style={{ display: step === 4 ? 'flex' : 'none', flexDirection: 'column', gap: '0.75rem', flex: 1 }}>
+                        {MODELS_4.map((m4, idx) => {
+                            const trainAcc = accuracy(m4.predict, TRAIN_DATA_4);
+                            const valAcc = accuracy(m4.predict, VAL_DATA_4);
+                            const isActive = idx === selectedModel4;
+                            return (
+                                <div
+                                    key={m4.key}
+                                    onClick={() => setSelectedModel4(idx)}
+                                    style={{
+                                        padding: '0.9rem 1rem',
+                                        background: isActive ? `${m4.color}15` : 'var(--card-bg)',
+                                        borderRadius: '12px',
+                                        border: `${isActive ? '2px' : '1px'} solid ${isActive ? m4.color : m4.color + '55'}`,
+                                        boxShadow: isActive ? `0 4px 18px ${m4.color}33` : '0 4px 6px -1px rgba(0, 0, 0, 0.1)',
+                                        cursor: 'pointer',
+                                        transition: 'all 0.2s'
+                                    }}
+                                >
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', marginBottom: '0.6rem' }}>
+                                        <div style={{ width: '12px', height: '12px', borderRadius: '50%', background: m4.color }} />
+                                        <strong style={{ color: m4.color }}>{m4.name}</strong>
+                                    </div>
+                                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem' }}>
+                                        <div style={{ padding: '0.5rem', background: 'rgba(59, 130, 246, 0.1)', borderRadius: '8px', textAlign: 'center', border: '1px solid rgba(59, 130, 246, 0.3)' }}>
+                                            <div style={{ fontSize: '0.7rem', color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Train Acc</div>
+                                            <div style={{ fontSize: '1.2rem', fontWeight: 700, fontFamily: 'monospace', color: '#3b82f6' }}>{(trainAcc * 100).toFixed(1)}%</div>
+                                        </div>
+                                        <div style={{ padding: '0.5rem', background: 'rgba(245, 158, 11, 0.1)', borderRadius: '8px', textAlign: 'center', border: '1px solid rgba(245, 158, 11, 0.3)' }}>
+                                            <div style={{ fontSize: '0.7rem', color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Val Acc</div>
+                                            <div style={{ fontSize: '1.2rem', fontWeight: 700, fontFamily: 'monospace', color: '#f59e0b' }}>
+                                                {revealValidation ? `${(valAcc * 100).toFixed(1)}%` : '???'}
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            );
+                        })}
+                    </div>
+
                     {/* STEP 3 PLOT - Learning Curve */}
                     <div style={{ display: step === 3 ? 'block' : 'none', flex: 1 }}>
                         <Plot
@@ -815,34 +1037,45 @@ export default function App() {
                         />
                     </div>
 
-                    <div style={{ display: 'flex', gap: '1rem', marginTop: 'auto' }}>
-                        <button className="btn" onClick={() => { setIsPlaying(!isPlaying); setPendingGradient(null); }}>
-                            {isPlaying ? <Pause size={18} /> : <Play size={18} />}
-                            {isPlaying ? "Pause" : "Play"}
-                        </button>
-                        {step !== 3 && (
-                            <button className="btn btn-secondary" onClick={handleManualStep} disabled={isPlaying}>
-                                <FastForward size={18} /> {pendingGradient ? "Apply Step" : "Show Slope"}
+                    {step === 4 ? (
+                        <div style={{ display: 'flex', gap: '1rem', marginTop: 'auto' }}>
+                            <button className="btn" onClick={() => setRevealValidation(v => !v)}>
+                                {revealValidation ? <EyeOff size={18} /> : <Eye size={18} />}
+                                {revealValidation ? 'Hide Validation' : 'Reveal Validation Data'}
                             </button>
-                        )}
-                        <button className="btn btn-secondary" onClick={resetModel}>
-                            <RotateCcw size={18} /> Reset
-                        </button>
-                    </div>
-
-                    <div className="slider-container" style={{ marginTop: '1rem' }}>
-                        <div className="slider-header">
-                            <span>Learning Rate (Log Scale): {Number(lr).toFixed(4)}</span>
                         </div>
-                        <input
-                            type="range"
-                            min="-3"
-                            max={Math.log10(0.5)}
-                            step="0.01"
-                            value={Math.log10(lr || 0.001)}
-                            onChange={(e) => setLr(parseFloat(Math.pow(10, parseFloat(e.target.value)).toFixed(4)))}
-                        />
-                    </div>
+                    ) : (
+                        <>
+                            <div style={{ display: 'flex', gap: '1rem', marginTop: 'auto' }}>
+                                <button className="btn" onClick={() => { setIsPlaying(!isPlaying); setPendingGradient(null); }}>
+                                    {isPlaying ? <Pause size={18} /> : <Play size={18} />}
+                                    {isPlaying ? "Pause" : "Play"}
+                                </button>
+                                {step !== 3 && (
+                                    <button className="btn btn-secondary" onClick={handleManualStep} disabled={isPlaying}>
+                                        <FastForward size={18} /> {pendingGradient ? "Apply Step" : "Show Slope"}
+                                    </button>
+                                )}
+                                <button className="btn btn-secondary" onClick={resetModel}>
+                                    <RotateCcw size={18} /> Reset
+                                </button>
+                            </div>
+
+                            <div className="slider-container" style={{ marginTop: '1rem' }}>
+                                <div className="slider-header">
+                                    <span>Learning Rate (Log Scale): {Number(lr).toFixed(4)}</span>
+                                </div>
+                                <input
+                                    type="range"
+                                    min="-3"
+                                    max={Math.log10(0.5)}
+                                    step="0.01"
+                                    value={Math.log10(lr || 0.001)}
+                                    onChange={(e) => setLr(parseFloat(Math.pow(10, parseFloat(e.target.value)).toFixed(4)))}
+                                />
+                            </div>
+                        </>
+                    )}
                 </div>
             </div>
         </div>
