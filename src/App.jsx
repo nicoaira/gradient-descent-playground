@@ -203,7 +203,8 @@ export default function App() {
     const calc1DCurve = () => {
         const m_vals = [];
         const cost_vals = [];
-        for (let i = -2; i <= 6; i += 0.2) {
+        // Wide range to support zooming out
+        for (let i = -100; i <= 100; i += 0.5) {
             m_vals.push(i);
             cost_vals.push(calcCost(data, i, 0));
         }
@@ -420,6 +421,7 @@ export default function App() {
                                     mode: 'markers',
                                     type: 'scatter',
                                     marker: { color: '#ef4444', size: 10, symbol: 'diamond' },
+                                    cliponaxis: false,
                                     name: 'Current m'
                                 }
                             ];
@@ -440,13 +442,14 @@ export default function App() {
                                     onClick={(evt) => handlePlotClick(evt, true)}
                                     layout={{
                                         showlegend: false,
+                                        uirevision: 'keep-zoom',
                                         autosize: true,
                                         paper_bgcolor: 'transparent',
                                         plot_bgcolor: 'transparent',
                                         font: { color: pTheme.fontColor },
                                         margin: { t: 30, r: 20, l: 80, b: 80 },
                                         xaxis: { title: { text: 'm (slope)', standoff: 15 }, gridcolor: pTheme.gridColor, range: [-2, 6], automargin: true },
-                                        yaxis: { title: { text: 'Cost J(m)', standoff: 15 }, gridcolor: pTheme.gridColor, range: [0, maxCost * 1.05], automargin: true }
+                                        yaxis: { title: { text: 'Cost J(m)', standoff: 15 }, gridcolor: pTheme.gridColor, range: [-maxCost * 0.05, maxCost * 1.05], automargin: true }
                                     }}
                                     useResizeHandler={true}
                                     style={{ width: "100%", height: "350px" }}
