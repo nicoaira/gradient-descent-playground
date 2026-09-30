@@ -98,6 +98,51 @@ const calcCost = (data, m, b) => {
     return error / (2 * data.length);
 };
 
+// Plotly's Viridis stops (same scale as the cost surface)
+const VIRIDIS = ['#440154', '#48186a', '#472d7b', '#424086', '#3b528b', '#33638d', '#2c728e', '#26828e', '#21918c',
+    '#1fa088', '#28ae80', '#3fbc73', '#5ec962', '#84d44b', '#addc30', '#d8e219', '#fde725'];
+
+// Descent path coloured by cost, for when the surface is hidden. A 2D scatter line takes a single
+// colour, so segments are grouped into one trace per Viridis stop; markers use the continuous scale.
+const costColoredPath = (history, data, ringColor) => {
+    // Recomputed from the current data: the stored cost of the first point can be stale after a reset
+    const costs = history.map(h => calcCost(data, h.m, h.b));
+    const cmin = Math.min(...costs);
+    const span = Math.max(...costs) - cmin || 1;
+    const bins = VIRIDIS.map(() => ({ x: [], y: [] }));
+    for (let i = 1; i < history.length; i++) {
+        const t = ((costs[i - 1] + costs[i]) / 2 - cmin) / span;
+        const bin = bins[Math.round(t * (VIRIDIS.length - 1))];
+        bin.x.push(history[i - 1].m, history[i].m, null);
+        bin.y.push(history[i - 1].b, history[i].b, null);
+    }
+    const segments = bins
+        .map((bin, i) => ({
+            x: bin.x, y: bin.y,
+            mode: 'lines', type: 'scatter',
+            line: { color: VIRIDIS[i], width: 2 },
+            hoverinfo: 'skip'
+        }))
+        .filter(t => t.x.length > 0);
+    return [
+        ...segments,
+        {
+            x: history.map(h => h.m),
+            y: history.map(h => h.b),
+            mode: 'markers',
+            type: 'scatter',
+            // Ring keeps the dark low-cost end of Viridis visible on the dark theme
+            marker: {
+                color: costs, colorscale: 'Viridis', cmin, cmax: cmin + span, size: 8,
+                line: { color: ringColor, width: 1 },
+                showscale: true, colorbar: { title: { text: 'cost' } }
+            },
+            name: 'Descent Path',
+            hovertemplate: 'w: %{x:.3f}<br>b: %{y:.3f}<br>cost: %{marker.color:.3f}<extra></extra>'
+        }
+    ];
+};
+
 export default function App() {
     const [step, setStep] = useState(1);
     const [trueM, setTrueM] = useState("2.8");
@@ -861,7 +906,7 @@ export default function App() {
                                     hoverinfo: hideSurface ? 'none' : 'all',
                                     name: 'Cost Surface'
                                 },
-                                {
+                                ...(hideSurface ? costColoredPath(history, data, pTheme.fontColor) : [{
                                     x: history.map(h => h.m),
                                     y: history.map(h => h.b),
                                     mode: 'lines+markers',
@@ -869,7 +914,7 @@ export default function App() {
                                     marker: { color: '#ef4444', size: 6 },
                                     line: { color: '#ef4444', width: 2 },
                                     name: 'Descent Path'
-                                }
+                                }])
                             ];
                             if (pendingGradient && step === 2) {
                                 // Fixed-length arrow showing the descent direction (the raw gradient is far too long to draw)
