@@ -110,6 +110,7 @@ export default function App() {
     const [lr, setLr] = useState(0.01);
     const [isPlaying, setIsPlaying] = useState(false);
     const [show3D, setShow3D] = useState(false);
+    const [hideSurface, setHideSurface] = useState(false);
     const [showErrors, setShowErrors] = useState(true);
 
     // New state for visualizing the slope/gradient before stepping
@@ -644,7 +645,7 @@ export default function App() {
                         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
                             <div className="metric-card">
                                 <div className="metric-value">{step === 3 ? nnLoss.toFixed(4) : m.toFixed(3)}</div>
-                                <div className="metric-label">{step === 3 ? 'Cross Entropy Loss' : 'Slope (m)'}</div>
+                                <div className="metric-label">{step === 3 ? 'Cross Entropy Loss' : 'Slope (w)'}</div>
                             </div>
                             {step === 2 && (
                                 <div className="metric-card">
@@ -734,17 +735,15 @@ export default function App() {
                                         style={{ width: '80px', background: 'var(--bg-color)', border: '1px solid var(--input-border)', color: 'var(--text-color)', padding: '0.5rem', borderRadius: '4px' }}
                                     />
                                 </div>
-                                {step === 2 && (
-                                    <div>
-                                        <label style={{ display: 'block', fontSize: '0.8rem', color: '#94a3b8', marginBottom: '0.25rem' }}>True Intercept</label>
-                                        <input
-                                            type="text"
-                                            value={trueB}
-                                            onChange={e => setTrueB(e.target.value)}
-                                            style={{ width: '80px', background: 'var(--bg-color)', border: '1px solid var(--input-border)', color: 'var(--text-color)', padding: '0.5rem', borderRadius: '4px' }}
-                                        />
-                                    </div>
-                                )}
+                                <div>
+                                    <label style={{ display: 'block', fontSize: '0.8rem', color: '#94a3b8', marginBottom: '0.25rem' }}>True Intercept</label>
+                                    <input
+                                        type="text"
+                                        value={trueB}
+                                        onChange={e => setTrueB(e.target.value)}
+                                        style={{ width: '80px', background: 'var(--bg-color)', border: '1px solid var(--input-border)', color: 'var(--text-color)', padding: '0.5rem', borderRadius: '4px' }}
+                                    />
+                                </div>
                                 <button className="btn btn-secondary" onClick={regenerateData} style={{ padding: '0.5rem 1rem' }}>
                                     <RotateCcw size={16} /> Data
                                 </button>
@@ -760,6 +759,12 @@ export default function App() {
                             {step === 3 ? "Learning Curve" : step === 4 ? "Train vs Validation Loss" : "Cost Landscape"}
                         </h3>
                         <div style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
+                            {(step === 1 || step === 2) && (
+                                <label style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.85rem', color: '#94a3b8', cursor: 'pointer', userSelect: 'none' }}>
+                                    <input type="checkbox" checked={hideSurface} onChange={e => setHideSurface(e.target.checked)} style={{ accentColor: '#facc15' }} />
+                                    {step === 1 ? 'Hide Curve' : 'Hide Surface'}
+                                </label>
+                            )}
                             {step === 2 && (
                                 <button className="btn btn-secondary" onClick={() => setShow3D(!show3D)} style={{ padding: '0.25rem 0.5rem', fontSize: '0.8rem' }}>
                                     {show3D ? "Show 2D Contour" : "Show 3D Surface"}
@@ -775,6 +780,8 @@ export default function App() {
                             const costM = calcCost(data, m, 0);
                             const curve = calc1DCurve();
                             const maxCost = Math.max(...curve.cost_vals);
+                            // With the curve hidden, the derivative at the current w is all we know, so always show it
+                            const grad = pendingGradient ?? (hideSurface ? calculateGradient() : null);
                             const traces = [
                                 {
                                     x: curve.m_vals,
@@ -782,7 +789,10 @@ export default function App() {
                                     mode: 'lines',
                                     type: 'scatter',
                                     line: { color: '#10b981', width: 2 },
-                                    name: 'Cost Function J(m)'
+                                    // Hidden via opacity (not removed) so the axes stay put and clicks still work
+                                    opacity: hideSurface ? 0 : 1,
+                                    hoverinfo: hideSurface ? 'none' : 'all',
+                                    name: 'Cost Function J(w)'
                                 },
                                 {
                                     x: [m],
@@ -791,14 +801,14 @@ export default function App() {
                                     type: 'scatter',
                                     marker: { color: '#ef4444', size: 10, symbol: 'diamond' },
                                     cliponaxis: false,
-                                    name: 'Current m'
+                                    name: 'Current w'
                                 }
                             ];
-                            if (pendingGradient && step === 1) {
+                            if (grad && step === 1) {
                                 const size = 2.0;
                                 traces.push({
                                     x: [m - size, m + size],
-                                    y: [costM - size * pendingGradient.dj_dm, costM + size * pendingGradient.dj_dm],
+                                    y: [costM - size * grad.dj_dm, costM + size * grad.dj_dm],
                                     mode: 'lines',
                                     type: 'scatter',
                                     line: { color: '#facc15', width: 4, dash: 'dot' },
@@ -824,8 +834,8 @@ export default function App() {
                                         plot_bgcolor: 'transparent',
                                         font: { color: pTheme.fontColor },
                                         margin: { t: 30, r: 20, l: 80, b: 80 },
-                                        xaxis: { title: { text: 'm (slope)', standoff: 15 }, gridcolor: pTheme.gridColor, automargin: true },
-                                        yaxis: { title: { text: 'Cost J(m)', standoff: 15 }, gridcolor: pTheme.gridColor, automargin: true }
+                                        xaxis: { title: { text: 'w (slope)', standoff: 15 }, gridcolor: pTheme.gridColor, automargin: true },
+                                        yaxis: { title: { text: 'Cost J(w)', standoff: 15 }, gridcolor: pTheme.gridColor, automargin: true }
                                     }}
                                     useResizeHandler={true}
                                     style={{ width: "100%", height: "350px" }}
@@ -837,6 +847,7 @@ export default function App() {
                     <div style={{ display: (step === 2 && !show3D) ? 'block' : 'none' }}>
                         {(() => {
                             const surface = calc2DSurface();
+                            const grad = pendingGradient ?? (hideSurface ? calculateGradient() : null);
                             const traces = [
                                 {
                                     z: surface.cost_grid,
@@ -845,6 +856,9 @@ export default function App() {
                                     type: 'contour',
                                     colorscale: 'Viridis',
                                     contours: { coloring: 'heatmap' },
+                                    opacity: hideSurface ? 0 : 1,
+                                    showscale: !hideSurface,
+                                    hoverinfo: hideSurface ? 'none' : 'all',
                                     name: 'Cost Surface'
                                 },
                                 {
@@ -857,11 +871,11 @@ export default function App() {
                                     name: 'Descent Path'
                                 }
                             ];
-                            if (pendingGradient && step === 2) {
+                            if (grad && step === 2) {
                                 const size = 2.0;
                                 traces.push({
-                                    x: [m, m - size * pendingGradient.dj_dm],
-                                    y: [b, b - size * pendingGradient.dj_db],
+                                    x: [m, m - size * grad.dj_dm],
+                                    y: [b, b - size * grad.dj_db],
                                     mode: 'lines',
                                     type: 'scatter',
                                     line: { color: '#facc15', width: 4, dash: 'dot' },
@@ -879,8 +893,9 @@ export default function App() {
                                         plot_bgcolor: 'transparent',
                                         font: { color: pTheme.fontColor },
                                         margin: { t: 30, r: 20, l: 80, b: 80 },
-                                        xaxis: { title: { text: 'm (slope)', standoff: 15 }, gridcolor: pTheme.gridColor, automargin: true },
-                                        yaxis: { title: { text: 'b (intercept)', standoff: 15 }, gridcolor: pTheme.gridColor, automargin: true }
+                                        // When hidden, pin the axes to the grid so the always-on gradient arrow can't rescale them
+                                        xaxis: { title: { text: 'w (slope)', standoff: 15 }, gridcolor: pTheme.gridColor, automargin: true, autorange: !hideSurface, range: hideSurface ? [surface.m_vals[0], surface.m_vals[surface.m_vals.length - 1]] : undefined },
+                                        yaxis: { title: { text: 'b (intercept)', standoff: 15 }, gridcolor: pTheme.gridColor, automargin: true, autorange: !hideSurface, range: hideSurface ? [surface.b_vals[0], surface.b_vals[surface.b_vals.length - 1]] : undefined }
                                     }}
                                     useResizeHandler={true}
                                     style={{ width: "100%", height: "350px" }}
@@ -892,6 +907,8 @@ export default function App() {
                     <div style={{ display: (step === 2 && show3D) ? 'block' : 'none' }}>
                         {(() => {
                             const surface = calc2DSurface();
+                            const grad = pendingGradient ?? (hideSurface ? calculateGradient() : null);
+                            const costs = surface.cost_grid.flat();
                             const traces = [
                                 {
                                     z: surface.cost_grid,
@@ -900,8 +917,9 @@ export default function App() {
                                     type: 'surface',
                                     colorscale: 'Viridis',
                                     showscale: false,
+                                    visible: !hideSurface,
                                     name: 'Cost Surface',
-                                    hovertemplate: 'm: %{x:.3f}<br>b: %{y:.3f}<br>cost: %{z:.2f}<extra></extra>'
+                                    hovertemplate: 'w: %{x:.3f}<br>b: %{y:.3f}<br>cost: %{z:.2f}<extra></extra>'
                                 },
                                 {
                                     x: history.map(h => h.m),
@@ -912,18 +930,21 @@ export default function App() {
                                     marker: { color: '#ef4444', size: 4 },
                                     line: { color: '#ef4444', width: 4 },
                                     name: 'Descent Path',
-                                    hovertemplate: 'm: %{x:.3f}<br>b: %{y:.3f}<br>cost: %{z:.2f}<extra></extra>'
+                                    hovertemplate: 'w: %{x:.3f}<br>b: %{y:.3f}<br>cost: %{z:.2f}<extra></extra>'
                                 }
                             ];
-                            if (pendingGradient && step === 2) {
+                            if (grad && step === 2) {
                                 const arrowLen = 1.5;
                                 const gradMag = Math.sqrt(
-                                    pendingGradient.dj_dm ** 2 + pendingGradient.dj_db ** 2
+                                    grad.dj_dm ** 2 + grad.dj_db ** 2
                                 ) || 1;
-                                const dm_n = (pendingGradient.dj_dm / gradMag) * arrowLen;
-                                const db_n = (pendingGradient.dj_db / gradMag) * arrowLen;
+                                const dm_n = (grad.dj_dm / gradMag) * arrowLen;
+                                const db_n = (grad.dj_db / gradMag) * arrowLen;
                                 const J0 = calcCost(data, m, b);
-                                const J1 = calcCost(data, m - dm_n, b - db_n);
+                                // Without the surface, follow the tangent plane (what the gradient tells us)
+                                const J1 = hideSurface
+                                    ? J0 - (grad.dj_dm * dm_n + grad.dj_db * db_n)
+                                    : calcCost(data, m - dm_n, b - db_n);
                                 const nDashes = 12;
                                 const gx = [], gy = [], gz = [];
                                 for (let i = 0; i <= nDashes; i++) {
@@ -956,9 +977,10 @@ export default function App() {
                                         font: { color: pTheme.fontColor },
                                         margin: { t: 0, r: 0, l: 0, b: 0 },
                                         scene: {
-                                            xaxis: { title: { text: 'm' }, gridcolor: pTheme.gridColor },
-                                            yaxis: { title: { text: 'b' }, gridcolor: pTheme.gridColor },
-                                            zaxis: { title: { text: 'cost' }, gridcolor: pTheme.gridColor }
+                                            // When hidden, keep the same box the surface would have given
+                                            xaxis: { title: { text: 'w' }, gridcolor: pTheme.gridColor, autorange: !hideSurface, range: hideSurface ? [surface.m_vals[0], surface.m_vals[surface.m_vals.length - 1]] : undefined },
+                                            yaxis: { title: { text: 'b' }, gridcolor: pTheme.gridColor, autorange: !hideSurface, range: hideSurface ? [surface.b_vals[0], surface.b_vals[surface.b_vals.length - 1]] : undefined },
+                                            zaxis: { title: { text: 'cost' }, gridcolor: pTheme.gridColor, autorange: !hideSurface, range: hideSurface ? [Math.min(...costs), Math.max(...costs)] : undefined }
                                         }
                                     }}
                                     useResizeHandler={true}
