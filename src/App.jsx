@@ -783,8 +783,6 @@ export default function App() {
                             const costM = calcCost(data, m, fixedB);
                             const curve = calc1DCurve();
                             const maxCost = Math.max(...curve.cost_vals);
-                            // With the curve hidden, the derivative at the current w is all we know, so always show it
-                            const grad = pendingGradient ?? (hideSurface ? calculateGradient() : null);
                             const traces = [
                                 {
                                     x: curve.m_vals,
@@ -807,11 +805,11 @@ export default function App() {
                                     name: 'Current w'
                                 }
                             ];
-                            if (grad && step === 1) {
+                            if (pendingGradient && step === 1) {
                                 const size = 2.0;
                                 traces.push({
                                     x: [m - size, m + size],
-                                    y: [costM - size * grad.dj_dm, costM + size * grad.dj_dm],
+                                    y: [costM - size * pendingGradient.dj_dm, costM + size * pendingGradient.dj_dm],
                                     mode: 'lines',
                                     type: 'scatter',
                                     line: { color: '#facc15', width: 4, dash: 'dot' },
@@ -850,7 +848,6 @@ export default function App() {
                     <div style={{ display: (step === 2 && !show3D) ? 'block' : 'none' }}>
                         {(() => {
                             const surface = calc2DSurface();
-                            const grad = pendingGradient ?? (hideSurface ? calculateGradient() : null);
                             const traces = [
                                 {
                                     z: surface.cost_grid,
@@ -874,11 +871,15 @@ export default function App() {
                                     name: 'Descent Path'
                                 }
                             ];
-                            if (grad && step === 2) {
-                                const size = 2.0;
+                            if (pendingGradient && step === 2) {
+                                // Fixed-length arrow showing the descent direction (the raw gradient is far too long to draw)
+                                const arrowLen = 1.5;
+                                const gradMag = Math.sqrt(
+                                    pendingGradient.dj_dm ** 2 + pendingGradient.dj_db ** 2
+                                ) || 1;
                                 traces.push({
-                                    x: [m, m - size * grad.dj_dm],
-                                    y: [b, b - size * grad.dj_db],
+                                    x: [m, m - (pendingGradient.dj_dm / gradMag) * arrowLen],
+                                    y: [b, b - (pendingGradient.dj_db / gradMag) * arrowLen],
                                     mode: 'lines',
                                     type: 'scatter',
                                     line: { color: '#facc15', width: 4, dash: 'dot' },
@@ -896,7 +897,7 @@ export default function App() {
                                         plot_bgcolor: 'transparent',
                                         font: { color: pTheme.fontColor },
                                         margin: { t: 30, r: 20, l: 80, b: 80 },
-                                        // When hidden, pin the axes to the grid so the always-on gradient arrow can't rescale them
+                                        // When hidden, pin the axes to the grid so they match the view with the surface shown
                                         xaxis: { title: { text: 'w (slope)', standoff: 15 }, gridcolor: pTheme.gridColor, automargin: true, autorange: !hideSurface, range: hideSurface ? [surface.m_vals[0], surface.m_vals[surface.m_vals.length - 1]] : undefined },
                                         yaxis: { title: { text: 'b (intercept)', standoff: 15 }, gridcolor: pTheme.gridColor, automargin: true, autorange: !hideSurface, range: hideSurface ? [surface.b_vals[0], surface.b_vals[surface.b_vals.length - 1]] : undefined }
                                     }}
@@ -910,7 +911,6 @@ export default function App() {
                     <div style={{ display: (step === 2 && show3D) ? 'block' : 'none' }}>
                         {(() => {
                             const surface = calc2DSurface();
-                            const grad = pendingGradient ?? (hideSurface ? calculateGradient() : null);
                             const costs = surface.cost_grid.flat();
                             const traces = [
                                 {
@@ -936,17 +936,17 @@ export default function App() {
                                     hovertemplate: 'w: %{x:.3f}<br>b: %{y:.3f}<br>cost: %{z:.2f}<extra></extra>'
                                 }
                             ];
-                            if (grad && step === 2) {
+                            if (pendingGradient && step === 2) {
                                 const arrowLen = 1.5;
                                 const gradMag = Math.sqrt(
-                                    grad.dj_dm ** 2 + grad.dj_db ** 2
+                                    pendingGradient.dj_dm ** 2 + pendingGradient.dj_db ** 2
                                 ) || 1;
-                                const dm_n = (grad.dj_dm / gradMag) * arrowLen;
-                                const db_n = (grad.dj_db / gradMag) * arrowLen;
+                                const dm_n = (pendingGradient.dj_dm / gradMag) * arrowLen;
+                                const db_n = (pendingGradient.dj_db / gradMag) * arrowLen;
                                 const J0 = calcCost(data, m, b);
                                 // Without the surface, follow the tangent plane (what the gradient tells us)
                                 const J1 = hideSurface
-                                    ? J0 - (grad.dj_dm * dm_n + grad.dj_db * db_n)
+                                    ? J0 - (pendingGradient.dj_dm * dm_n + pendingGradient.dj_db * db_n)
                                     : calcCost(data, m - dm_n, b - db_n);
                                 const nDashes = 12;
                                 const gx = [], gy = [], gz = [];
