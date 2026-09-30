@@ -104,9 +104,8 @@ const VIRIDIS = ['#440154', '#48186a', '#472d7b', '#424086', '#3b528b', '#33638d
 
 // Descent path coloured by cost, for when the surface is hidden. A 2D scatter line takes a single
 // colour, so segments are grouped into one trace per Viridis stop; markers use the continuous scale.
-const costColoredPath = (history, data, ringColor) => {
-    // Recomputed from the current data: the stored cost of the first point can be stale after a reset
-    const costs = history.map(h => calcCost(data, h.m, h.b));
+const costColoredPath = (history, ringColor) => {
+    const costs = history.map(h => h.cost);
     const cmin = Math.min(...costs);
     const span = Math.max(...costs) - cmin || 1;
     const bins = VIRIDIS.map(() => ({ x: [], y: [] }));
@@ -142,6 +141,23 @@ const costColoredPath = (history, data, ringColor) => {
         }
     ];
 };
+
+// "Show Slope" preview of the next step: an arrow along a parameter axis from the current value to
+// the value after applying the step. Drawn on an invisible 0-1 overlay axis so it sits on the real
+// axis whatever its range, and is clipped at the plot edge like any other trace.
+const STEP_COLOR = '#f97316';
+const OVERLAY_AXIS = { range: [0, 1], visible: false, fixedrange: true };
+const axisStepArrow = (from, to, alongX) => ({
+    ...(alongX
+        ? { x: [from, to], y: [0.03, 0.03], yaxis: 'y2' }
+        : { x: [0.03, 0.03], y: [from, to], xaxis: 'x2' }),
+    mode: 'lines+markers',
+    type: 'scatter',
+    line: { color: STEP_COLOR, width: 3 },
+    marker: { color: STEP_COLOR, symbol: ['circle', 'arrow'], size: [6, 14], angleref: 'previous', line: { width: 0 } },
+    hoverinfo: 'skip',
+    name: alongX ? 'Next step (w)' : 'Next step (b)'
+});
 
 export default function App() {
     const [step, setStep] = useState(1);
@@ -209,16 +225,17 @@ export default function App() {
 
     useEffect(() => { resetMLP(hiddenNeurons); }, [hiddenNeurons]);
 
-    // Reset model
-    const resetModel = () => {
-        if (step === 3) {
+    // Reset model. Callers that just switched step or regenerated data pass the new values,
+    // since `step` and `data` still hold the old ones until the next render.
+    const resetModel = (forStep = step, forData = data) => {
+        if (forStep === 3) {
             resetMLP(hiddenNeurons);
             setIsPlaying(false);
             return;
         }
         setM(0);
         setB(0);
-        setHistory([{ m: 0, b: 0, cost: calcCost(data, 0, 0) }]);
+        setHistory([{ m: 0, b: 0, cost: calcCost(forData, 0, 0) }]);
         setIsPlaying(false);
         setPendingGradient(null);
     };
@@ -227,10 +244,12 @@ export default function App() {
         const t = type ?? datasetType;
         if (step === 3) {
             setClassData(generateClassificationData(t));
+            resetModel();
         } else {
-            setData(generateData(parseFloat(trueM) || 0, parseFloat(trueB) || 0));
+            const newData = generateData(parseFloat(trueM) || 0, parseFloat(trueB) || 0);
+            setData(newData);
+            resetModel(step, newData);
         }
-        resetModel();
     };
 
     // Use refs so the animation loop always reads the latest values
@@ -271,39 +290,25 @@ export default function App() {
     // Convenience wrapper using current state (for manual steps)
     const calculateGradient = () => calculateGradientAt(m, b, step, data);
 
+    // Reads from refs instead of nesting setState calls inside updater functions: StrictMode runs
+    // updaters twice in development, which recorded every step twice.
     const applyGradient = (dj_dm, dj_db) => {
-        setM((prevM) => {
-            const curLr = lrRef.current;
-            const curStep = stepRef.current;
-            const curData = dataRef.current;
-            const newM = prevM - curLr * dj_dm;
-            setB((prevB) => {
-                const newB = curStep === 1 ? fixedBRef.current : prevB - curLr * dj_db;
-                const newCost = calcCost(curData, newM, newB);
-                setHistory(prev => [...prev, { m: newM, b: newB, cost: newCost }]);
-                return newB;
-            });
-            return newM;
-        });
+        const curLr = lrRef.current;
+        const newM = mRef.current - curLr * dj_dm;
+        const newB = stepRef.current === 1 ? fixedBRef.current : bRef.current - curLr * dj_db;
+        const newCost = calcCost(dataRef.current, newM, newB);
+        // Keep refs current for the next animation tick, before the re-render catches up
+        mRef.current = newM;
+        bRef.current = newB;
+        setM(newM);
+        setB(newB);
+        setHistory(prev => [...prev, { m: newM, b: newB, cost: newCost }]);
     };
 
     // One full step: compute gradient from current refs, then apply
     const takeStepFromRefs = () => {
-        setM((prevM) => {
-            const curB = bRef.current;
-            const curLr = lrRef.current;
-            const curStep = stepRef.current;
-            const curData = dataRef.current;
-            const grads = calculateGradientAt(prevM, curB, curStep, curData);
-            const newM = prevM - curLr * grads.dj_dm;
-            setB((prevB) => {
-                const newB = curStep === 1 ? fixedBRef.current : prevB - curLr * grads.dj_db;
-                const newCost = calcCost(curData, newM, newB);
-                setHistory(prev => [...prev, { m: newM, b: newB, cost: newCost }]);
-                return newB;
-            });
-            return newM;
-        });
+        const grads = calculateGradientAt(mRef.current, bRef.current, stepRef.current, dataRef.current);
+        applyGradient(grads.dj_dm, grads.dj_db);
     };
 
     // Manual interaction step (uses current rendered state)
@@ -461,12 +466,14 @@ export default function App() {
 
             <div className="nav-tabs">
                 <div className={`nav-tab ${step === 1 ? 'active' : ''}`} onClick={() => {
-                    setStep(1); setTrueM("2.8"); setTrueB("0"); setData(generateData(2.8, 0)); resetModel();
+                    const newData = generateData(2.8, 0);
+                    setStep(1); setTrueM("2.8"); setTrueB("0"); setData(newData); resetModel(1, newData);
                 }}>
                     Step 1: 1D Search (Slope Only)
                 </div>
                 <div className={`nav-tab ${step === 2 ? 'active' : ''}`} onClick={() => {
-                    setStep(2); setTrueM("3.5"); setTrueB("1.8"); setData(generateData(3.5, 1.8)); resetModel();
+                    const newData = generateData(3.5, 1.8);
+                    setStep(2); setTrueM("3.5"); setTrueB("1.8"); setData(newData); resetModel(2, newData);
                 }}>
                     Step 2: 2D Search (Slope & Intercept)
                 </div>
@@ -690,7 +697,7 @@ export default function App() {
                     )}
 
                     {step !== 4 && (
-                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+                        <div style={{ display: 'grid', gridTemplateColumns: step === 1 ? 'repeat(3, 1fr)' : '1fr 1fr', gap: '1rem' }}>
                             <div className="metric-card">
                                 <div className="metric-value">{step === 3 ? nnLoss.toFixed(4) : m.toFixed(3)}</div>
                                 <div className="metric-label">{step === 3 ? 'Cross Entropy Loss' : 'Slope (w)'}</div>
@@ -707,6 +714,10 @@ export default function App() {
                                     <div className="metric-label">MSE (Cost)</div>
                                 </div>
                             )}
+                            <div className="metric-card">
+                                <div className="metric-value">{step === 3 ? nnEpochs : history.length - 1}</div>
+                                <div className="metric-label">{step === 3 ? 'Epochs' : 'Steps'}</div>
+                            </div>
                         </div>
                     )}
 
@@ -860,6 +871,7 @@ export default function App() {
                                     line: { color: '#facc15', width: 4, dash: 'dot' },
                                     name: 'Slope (Derivative)'
                                 });
+                                traces.push(axisStepArrow(m, m - lr * pendingGradient.dj_dm, true));
                             }
                             return (
                                 <Plot
@@ -881,7 +893,8 @@ export default function App() {
                                         font: { color: pTheme.fontColor },
                                         margin: { t: 30, r: 20, l: 80, b: 80 },
                                         xaxis: { title: { text: 'w (slope)', standoff: 15 }, gridcolor: pTheme.gridColor, automargin: true },
-                                        yaxis: { title: { text: 'Cost J(w)', standoff: 15 }, gridcolor: pTheme.gridColor, automargin: true }
+                                        yaxis: { title: { text: 'Cost J(w)', standoff: 15 }, gridcolor: pTheme.gridColor, automargin: true },
+                                        yaxis2: { ...OVERLAY_AXIS, overlaying: 'y' }
                                     }}
                                     useResizeHandler={true}
                                     style={{ width: "100%", height: "350px" }}
@@ -906,7 +919,7 @@ export default function App() {
                                     hoverinfo: hideSurface ? 'none' : 'all',
                                     name: 'Cost Surface'
                                 },
-                                ...(hideSurface ? costColoredPath(history, data, pTheme.fontColor) : [{
+                                ...(hideSurface ? costColoredPath(history, pTheme.fontColor) : [{
                                     x: history.map(h => h.m),
                                     y: history.map(h => h.b),
                                     mode: 'lines+markers',
@@ -930,6 +943,8 @@ export default function App() {
                                     line: { color: '#facc15', width: 4, dash: 'dot' },
                                     name: 'Gradient Direction'
                                 });
+                                traces.push(axisStepArrow(m, m - lr * pendingGradient.dj_dm, true));
+                                traces.push(axisStepArrow(b, b - lr * pendingGradient.dj_db, false));
                             }
                             return (
                                 <Plot
@@ -944,7 +959,9 @@ export default function App() {
                                         margin: { t: 30, r: 20, l: 80, b: 80 },
                                         // When hidden, pin the axes to the grid so they match the view with the surface shown
                                         xaxis: { title: { text: 'w (slope)', standoff: 15 }, gridcolor: pTheme.gridColor, automargin: true, autorange: !hideSurface, range: hideSurface ? [surface.m_vals[0], surface.m_vals[surface.m_vals.length - 1]] : undefined },
-                                        yaxis: { title: { text: 'b (intercept)', standoff: 15 }, gridcolor: pTheme.gridColor, automargin: true, autorange: !hideSurface, range: hideSurface ? [surface.b_vals[0], surface.b_vals[surface.b_vals.length - 1]] : undefined }
+                                        yaxis: { title: { text: 'b (intercept)', standoff: 15 }, gridcolor: pTheme.gridColor, automargin: true, autorange: !hideSurface, range: hideSurface ? [surface.b_vals[0], surface.b_vals[surface.b_vals.length - 1]] : undefined },
+                                        xaxis2: { ...OVERLAY_AXIS, overlaying: 'x' },
+                                        yaxis2: { ...OVERLAY_AXIS, overlaying: 'y' }
                                     }}
                                     useResizeHandler={true}
                                     style={{ width: "100%", height: "350px" }}
@@ -1126,7 +1143,7 @@ export default function App() {
                                         <FastForward size={18} /> {pendingGradient ? "Apply Step" : "Show Slope"}
                                     </button>
                                 )}
-                                <button className="btn btn-secondary" onClick={resetModel}>
+                                <button className="btn btn-secondary" onClick={() => resetModel()}>
                                     <RotateCcw size={18} /> Reset
                                 </button>
                             </div>
