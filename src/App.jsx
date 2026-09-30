@@ -143,21 +143,37 @@ const costColoredPath = (history, ringColor) => {
 };
 
 // "Show Slope" preview of the next step: an arrow along a parameter axis from the current value to
-// the value after applying the step. Drawn on an invisible 0-1 overlay axis so it sits on the real
-// axis whatever its range, and is clipped at the plot edge like any other trace.
+// the value after applying the step, plus dashed guide lines across the plot at both values.
+// Drawn on an invisible 0-1 overlay axis so they sit on the real axis whatever its range, and are
+// clipped at the plot edge like any other trace.
 const STEP_COLOR = '#f97316';
 const OVERLAY_AXIS = { range: [0, 1], visible: false, fixedrange: true };
-const axisStepArrow = (from, to, alongX) => ({
-    ...(alongX
-        ? { x: [from, to], y: [0.03, 0.03], yaxis: 'y2' }
-        : { x: [0.03, 0.03], y: [from, to], xaxis: 'x2' }),
-    mode: 'lines+markers',
-    type: 'scatter',
-    line: { color: STEP_COLOR, width: 3 },
-    marker: { color: STEP_COLOR, symbol: ['circle', 'arrow'], size: [6, 14], angleref: 'previous', line: { width: 0 } },
-    hoverinfo: 'skip',
-    name: alongX ? 'Next step (w)' : 'Next step (b)'
-});
+const axisStepTraces = (from, to, alongX) => {
+    const param = alongX ? 'w' : 'b';
+    const guides = {
+        ...(alongX
+            ? { x: [from, from, null, to, to], y: [0, 1, null, 0, 1], yaxis: 'y2' }
+            : { x: [0, 1, null, 0, 1], y: [from, from, null, to, to], xaxis: 'x2' }),
+        mode: 'lines',
+        type: 'scatter',
+        line: { color: STEP_COLOR, width: 1.5, dash: 'dash' },
+        opacity: 0.8,
+        hoverinfo: 'skip',
+        name: `Current / next ${param}`
+    };
+    const arrow = {
+        ...(alongX
+            ? { x: [from, to], y: [0.03, 0.03], yaxis: 'y2' }
+            : { x: [0.03, 0.03], y: [from, to], xaxis: 'x2' }),
+        mode: 'lines+markers',
+        type: 'scatter',
+        line: { color: STEP_COLOR, width: 3 },
+        marker: { color: STEP_COLOR, symbol: ['circle', 'arrow'], size: [6, 14], angleref: 'previous', line: { width: 0 } },
+        hoverinfo: 'skip',
+        name: `Next step (${param})`
+    };
+    return [guides, arrow];
+};
 
 export default function App() {
     const [step, setStep] = useState(1);
@@ -374,17 +390,26 @@ export default function App() {
 
     // 1D Cost Curve Setup (Cost vs w, with b fixed at the True Intercept)
     const calc1DCurve = () => {
-        const m_vals = [];
-        const cost_vals = [];
         const span = mView.max - mView.min;
-        const step = span / 100; // 100 points is enough for a smooth parabola
+        const lo = mView.min - span;
+        const hi = mView.max + span;
 
-        // Draw slightly beyond the view to avoid edges during panning
-        for (let i = mView.min - span; i <= mView.max + span; i += step) {
-            m_vals.push(i);
-            cost_vals.push(calcCost(data, i, fixedB));
+        // Draw slightly beyond the view to avoid edges during panning (100 points per view width
+        // is enough for a smooth parabola)
+        const m_vals = [];
+        for (let i = 0; i <= 300; i++) m_vals.push(lo + i * span / 100);
+
+        // After a large step the current (or previewed) w can land far outside that range. Extend the
+        // curve out to it with a fixed number of points, so it stays cheap even when w diverges.
+        const targets = [m, ...(pendingGradient && step === 1 ? [m - lr * pendingGradient.dj_dm] : [])]
+            .filter(Number.isFinite);
+        const farLo = Math.min(lo, ...targets);
+        const farHi = Math.max(hi, ...targets);
+        if (farLo < lo || farHi > hi) {
+            for (let i = 0; i <= 200; i++) m_vals.push(farLo + i * (farHi - farLo) / 200);
+            m_vals.sort((a, b) => a - b);
         }
-        return { m_vals, cost_vals };
+        return { m_vals, cost_vals: m_vals.map(w => calcCost(data, w, fixedB)) };
     };
 
     // 3D Cost Surface Setup (Cost vs m vs b)
@@ -399,7 +424,11 @@ export default function App() {
         let min_b = -5;
         let max_b = 15;
 
-        for (let h of history) {
+        // Also cover the previewed next point, so its guide lines and arrows stay over the surface
+        const next = pendingGradient && step === 2
+            ? [{ m: m - lr * pendingGradient.dj_dm, b: b - lr * pendingGradient.dj_db }]
+            : [];
+        for (let h of [...history, ...next.filter(p => Number.isFinite(p.m) && Number.isFinite(p.b))]) {
             if (h.m < min_m) min_m = h.m;
             if (h.m > max_m) max_m = h.m;
             if (h.b < min_b) min_b = h.b;
@@ -871,7 +900,7 @@ export default function App() {
                                     line: { color: '#facc15', width: 4, dash: 'dot' },
                                     name: 'Slope (Derivative)'
                                 });
-                                traces.push(axisStepArrow(m, m - lr * pendingGradient.dj_dm, true));
+                                traces.push(...axisStepTraces(m, m - lr * pendingGradient.dj_dm, true));
                             }
                             return (
                                 <Plot
@@ -943,8 +972,8 @@ export default function App() {
                                     line: { color: '#facc15', width: 4, dash: 'dot' },
                                     name: 'Gradient Direction'
                                 });
-                                traces.push(axisStepArrow(m, m - lr * pendingGradient.dj_dm, true));
-                                traces.push(axisStepArrow(b, b - lr * pendingGradient.dj_db, false));
+                                traces.push(...axisStepTraces(m, m - lr * pendingGradient.dj_dm, true));
+                                traces.push(...axisStepTraces(b, b - lr * pendingGradient.dj_db, false));
                             }
                             return (
                                 <Plot
@@ -1150,7 +1179,7 @@ export default function App() {
 
                             <div className="slider-container" style={{ marginTop: '1rem' }}>
                                 <div className="slider-header">
-                                    <span>Learning Rate (Log Scale): {Number(lr).toFixed(4)}</span>
+                                    <span>Learning Rate (α): {Number(lr).toFixed(4)}</span>
                                 </div>
                                 <input
                                     type="range"
