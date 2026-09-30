@@ -103,6 +103,8 @@ export default function App() {
     const [trueM, setTrueM] = useState("2.8");
     const [trueB, setTrueB] = useState("0");
     const [data, setData] = useState(() => generateData(2.8, 0));
+    // Step 1 only learns the slope; its intercept is fixed at the True Intercept value
+    const fixedB = parseFloat(trueB) || 0;
 
     // Model parameters
     const [m, setM] = useState(0);
@@ -195,6 +197,8 @@ export default function App() {
     const classDataRef = useRef(classData);
     useEffect(() => { mRef.current = m; }, [m]);
     useEffect(() => { bRef.current = b; }, [b]);
+    const fixedBRef = useRef(fixedB);
+    useEffect(() => { fixedBRef.current = fixedB; }, [fixedB]);
     useEffect(() => { lrRef.current = lr; }, [lr]);
     useEffect(() => { stepRef.current = step; }, [step]);
     useEffect(() => { dataRef.current = data; }, [data]);
@@ -207,7 +211,7 @@ export default function App() {
         let dj_db = 0;
 
         for (let pt of curData) {
-            const usedB = curStep === 1 ? 0 : curB;
+            const usedB = curStep === 1 ? fixedBRef.current : curB;
             const pred = curM * pt.x + usedB;
             const error = pred - pt.y;
 
@@ -229,7 +233,7 @@ export default function App() {
             const curData = dataRef.current;
             const newM = prevM - curLr * dj_dm;
             setB((prevB) => {
-                const newB = curStep === 1 ? 0 : prevB - curLr * dj_db;
+                const newB = curStep === 1 ? fixedBRef.current : prevB - curLr * dj_db;
                 const newCost = calcCost(curData, newM, newB);
                 setHistory(prev => [...prev, { m: newM, b: newB, cost: newCost }]);
                 return newB;
@@ -248,7 +252,7 @@ export default function App() {
             const grads = calculateGradientAt(prevM, curB, curStep, curData);
             const newM = prevM - curLr * grads.dj_dm;
             setB((prevB) => {
-                const newB = curStep === 1 ? 0 : prevB - curLr * grads.dj_db;
+                const newB = curStep === 1 ? fixedBRef.current : prevB - curLr * grads.dj_db;
                 const newCost = calcCost(curData, newM, newB);
                 setHistory(prev => [...prev, { m: newM, b: newB, cost: newCost }]);
                 return newB;
@@ -272,7 +276,7 @@ export default function App() {
         if (!evt || !evt.points || evt.points.length === 0) return;
         const pt = evt.points[0];
         const newM = pt.x;
-        const newB = isStep1 ? 0 : pt.y;
+        const newB = isStep1 ? fixedB : pt.y;
 
         setIsPlaying(false);
         setM(newM);
@@ -315,11 +319,10 @@ export default function App() {
     const yVals = data.map(d => d.y);
     const max_X = Math.max(...xVals, 10);
     const line_X = [0, max_X];
-    const currentB = step === 1 ? 0 : b;
+    const currentB = step === 1 ? fixedB : b;
     const line_Y = [currentB, m * max_X + currentB];
 
-    // 1D Cost Curve Setup (Cost vs m, assuming b=0)
-    // 1D Cost Curve Setup (Cost vs m, assuming b=0)
+    // 1D Cost Curve Setup (Cost vs w, with b fixed at the True Intercept)
     const calc1DCurve = () => {
         const m_vals = [];
         const cost_vals = [];
@@ -329,7 +332,7 @@ export default function App() {
         // Draw slightly beyond the view to avoid edges during panning
         for (let i = mView.min - span; i <= mView.max + span; i += step) {
             m_vals.push(i);
-            cost_vals.push(calcCost(data, i, 0));
+            cost_vals.push(calcCost(data, i, fixedB));
         }
         return { m_vals, cost_vals };
     };
@@ -655,7 +658,7 @@ export default function App() {
                             )}
                             {step !== 3 && (
                                 <div className="metric-card">
-                                    <div className="metric-value">{calcCost(data, m, step === 1 ? 0 : b).toFixed(3)}</div>
+                                    <div className="metric-value">{calcCost(data, m, currentB).toFixed(3)}</div>
                                     <div className="metric-label">MSE (Cost)</div>
                                 </div>
                             )}
@@ -777,7 +780,7 @@ export default function App() {
                     {/* STEP 1 PLOT – always mounted, hidden when step !== 1 */}
                     <div style={{ display: step === 1 ? 'block' : 'none' }}>
                         {(() => {
-                            const costM = calcCost(data, m, 0);
+                            const costM = calcCost(data, m, fixedB);
                             const curve = calc1DCurve();
                             const maxCost = Math.max(...curve.cost_vals);
                             // With the curve hidden, the derivative at the current w is all we know, so always show it
