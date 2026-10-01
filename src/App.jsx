@@ -78,6 +78,10 @@ Plotly.purge = (gd) => {
 
 const Plot = createPlotlyComponent(Plotly);
 
+// Steps 3 (neural network) and 4 (train/validation split) are archived: their code is kept but
+// their tabs are hidden. Set to true to bring them back.
+const SHOW_ARCHIVED_STEPS = false;
+
 const generateData = (trueM, trueB) => {
     const pts = [];
     for (let i = 0; i < 20; i++) {
@@ -506,16 +510,20 @@ export default function App() {
                 }}>
                     Step 2: 2D Search (Slope & Intercept)
                 </div>
-                <div className={`nav-tab ${step === 3 ? 'active' : ''}`} onClick={() => {
-                    setStep(3); resetMLP(hiddenNeurons); setClassData(generateClassificationData()); setIsPlaying(false);
-                }}>
-                    Step 3: Neural Network (Classification)
-                </div>
-                <div className={`nav-tab ${step === 4 ? 'active' : ''}`} onClick={() => {
-                    setStep(4); setIsPlaying(false); setRevealValidation(false);
-                }}>
-                    Step 4: Train / Validation Split
-                </div>
+                {SHOW_ARCHIVED_STEPS && (
+                    <>
+                        <div className={`nav-tab ${step === 3 ? 'active' : ''}`} onClick={() => {
+                            setStep(3); resetMLP(hiddenNeurons); setClassData(generateClassificationData()); setIsPlaying(false);
+                        }}>
+                            Step 3: Neural Network (Classification)
+                        </div>
+                        <div className={`nav-tab ${step === 4 ? 'active' : ''}`} onClick={() => {
+                            setStep(4); setIsPlaying(false); setRevealValidation(false);
+                        }}>
+                            Step 4: Train / Validation Split
+                        </div>
+                    </>
+                )}
             </div>
 
             <div className="layout-grid glass-panel">
