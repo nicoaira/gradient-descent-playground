@@ -1084,6 +1084,22 @@ export default function App() {
                         })()}
                     </div>
 
+                    {/* Gradient values shown with "Show Slope" (step 1 only learns w) */}
+                    {pendingGradient && (step === 1 || step === 2) && (
+                        <div style={{ display: 'grid', gridTemplateColumns: step === 1 ? '1fr' : '1fr 1fr', gap: '1rem' }}>
+                            <div className="metric-card">
+                                <div className="metric-value">{pendingGradient.dj_dm.toFixed(3)}</div>
+                                <div className="metric-label" style={{ textTransform: 'none' }}>∂J/∂w</div>
+                            </div>
+                            {step === 2 && (
+                                <div className="metric-card">
+                                    <div className="metric-value">{pendingGradient.dj_db.toFixed(3)}</div>
+                                    <div className="metric-label" style={{ textTransform: 'none' }}>∂J/∂b</div>
+                                </div>
+                            )}
+                        </div>
+                    )}
+
                     {/* STEP 4 - Train vs Validation Accuracy Cards */}
                     <div style={{ display: step === 4 ? 'flex' : 'none', flexDirection: 'column', gap: '0.75rem', flex: 1 }}>
                         {MODELS_4.map((m4, idx) => {
